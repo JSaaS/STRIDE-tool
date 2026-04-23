@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 Funktion	Hur
 Karta	Hela mittdelen är nu ett scrollbart canvas med prickig bakgrund
 Trust boundaries	Drag i headern för att flytta, ⤡-handtag nere till höger för resize
@@ -8,3 +9,7 @@ Tröskel	Inställning i headern (default 25), överskriden = röd ⚠ på noden
 Flöden	↔-knapp → klicka startnod → klicka målnod → ge namn → pil ritas. Hanteras i sidopanelen
 Export	Rapporten inkluderar nu flödeslista + DREAD-kolumner + antal kritiska hot
 Tangentbordsgenvägar: Escape stänger modalfönster, avbryter flödesläge, eller stänger öppet hotformulär.
+=======
+# STRIDE-tool
+A simple tool to help with creating STRIDE analysis of your system.
+>>>>>>> 18447a13664b676c44ccb0c771fa58725d007651
