@@ -1,7 +1,7 @@
 # STRIDE-tool
 A simple tool to help with creating STRIDE analysis of your system.
 
-Read about the basics of STRIDE here: [STRIDE – The Basics](documentation/requirements/stride_basics.md)
+Read about the basics of STRIDE here: [STRIDE – The Basics](Documentation/Requirements/stride_basics.md)
 
 |Feature|How|
 |---|---|
@@ -19,7 +19,7 @@ Read about the basics of STRIDE here: [STRIDE – The Basics](documentation/requ
 # STRIDE-tool
 Ett simpelt verktyg som hjälper dig och ditt team att skapa STRIDE-analyser av ditt system.
 
-Läs om grunderna i STRIDE här: [STRIDE – Grunderna](documentation/requirements/stride_grunder.md)
+Läs om grunderna i STRIDE här: [STRIDE – Grunderna](Documentation/Requirements/stride_grunder.md)
 
 |Funktion|Hur|
 |---|---|
