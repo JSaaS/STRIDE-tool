@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STRIDE Threat Modeling</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #f1f5f9; color: #1e293b; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+/* Header */
+header { background: #0f172a; color: white; padding: 0 16px; height: 52px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.logo { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #475569; padding-right: 12px; border-right: 1px solid #1e293b; white-space: nowrap; }
+#session-name { background: transparent; border: none; color: white; font-size: 0.95rem; font-weight: 600; outline: none; flex: 1; min-width: 0; }
+#session-name::placeholder { color: #334155; font-weight: 400; }
+.hdr-r { display: flex; align-items: center; gap: 10px; }
+.thr-wrap { display: flex; align-items: center; gap: 5px; font-size: 0.73rem; color: #64748b; }
+#threshold { width: 44px; padding: 3px 4px; background: #1e293b; border: 1px solid #334155; border-radius: 4px; color: #cbd5e1; font-size: 0.78rem; text-align: center; }
+.btn-h { padding: 6px 14px; border-radius: 6px; border: 1px solid #334155; background: transparent; color: #94a3b8; cursor: pointer; font-size: 0.78rem; font-weight: 500; }
+.btn-h:hover { background: #1e293b; color: white; }
+
+/* Shell */
+.app { display: flex; flex: 1; overflow: hidden; }
+
+/* Sidebar */
+aside { width: 214px; background: white; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+.sbt { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+.sbt span { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; }
+.ibs { display: flex; gap: 4px; }
+.bic { width: 24px; height: 24px; border-radius: 4px; border: 1px solid #e2e8f0; background: white; cursor: pointer; font-size: 0.8rem; color: #64748b; display: flex; align-items: center; justify-content: center; }
+.bic:hover { background: #f8fafc; }
+.bic.on { background: #eff6ff; border-color: #bfdbfe; color: #2563eb; }
+.sb-sep { height: 1px; background: #f1f5f9; margin: 6px 0; flex-shrink: 0; }
+
+.bg { padding-bottom: 2px; }
+.bl { padding: 9px 12px 2px; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; display: flex; justify-content: space-between; align-items: center; }
+.bl .x { opacity: 0; background: none; border: none; cursor: pointer; color: #cbd5e1; font-size: 0.68rem; padding: 1px 2px; }
+.bl:hover .x { opacity: 1; }
+.ci { padding: 6px 10px 6px 16px; cursor: pointer; display: flex; align-items: center; gap: 5px; border-radius: 5px; margin: 1px 4px; }
+.ci:hover { background: #f8fafc; }
+.ci.sel { background: #eff6ff; }
+.ci .nm { font-size: 0.8rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #334155; }
+.ci.sel .nm { color: #1d4ed8; font-weight: 500; }
+.ci .bd { font-size: 0.6rem; padding: 1px 5px; border-radius: 7px; flex-shrink: 0; background: #e2e8f0; color: #64748b; }
+.ci .x { opacity: 0; background: none; border: none; cursor: pointer; color: #cbd5e1; font-size: 0.68rem; padding: 1px 2px; flex-shrink: 0; }
+.ci:hover .x { opacity: 1; }
+.fi { padding: 5px 10px; display: flex; align-items: center; gap: 5px; border-radius: 5px; margin: 1px 4px; }
+.fi .fl { font-size: 0.76rem; flex: 1; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fi .x { opacity: 0; background: none; border: none; cursor: pointer; color: #cbd5e1; font-size: 0.68rem; padding: 1px 2px; flex-shrink: 0; }
+.fi:hover .x { opacity: 1; }
+
+/* Map */
+.map-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.map-tb { background: white; border-bottom: 1px solid #e2e8f0; padding: 7px 12px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.tb-btn { padding: 5px 11px; border-radius: 5px; border: 1px solid #e2e8f0; background: white; cursor: pointer; font-size: 0.75rem; color: #334155; font-weight: 500; white-space: nowrap; }
+.tb-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
+.tb-btn.on { background: #eff6ff; border-color: #2563eb; color: #2563eb; }
+#flow-hint { font-size: 0.72rem; color: #2563eb; display: none; }
+.canvas-wrap { flex: 1; overflow: auto; background: #f8fafc; background-image: radial-gradient(#dde4ed 1px, transparent 1px); background-size: 22px 22px; }
+.canvas-wrap.flow-mode, .canvas-wrap.flow-mode .cn { cursor: crosshair; }
+.canvas { position: relative; width: 3200px; height: 2200px; }
+
+/* Boundary zones */
+.bz { position: absolute; border: 2px dashed #94a3b8; border-radius: 10px; background: rgba(241,245,249,0.55); z-index: 1; }
+.bz-hdr { padding: 7px 10px 4px; display: flex; justify-content: space-between; align-items: center; cursor: move; user-select: none; }
+.bz-nm { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }
+.bz-del { background: none; border: none; cursor: pointer; color: #cbd5e1; font-size: 0.7rem; opacity: 0; padding: 2px 4px; pointer-events: all; }
+.bz:hover .bz-del { opacity: 1; }
+.bz-rsz { position: absolute; right: 1px; bottom: 1px; width: 18px; height: 18px; cursor: se-resize; color: #94a3b8; font-size: 11px; display: flex; align-items: center; justify-content: center; }
+
+/* Component nodes */
+.cn { position: absolute; background: white; border: 2px solid #e2e8f0; border-radius: 8px; padding: 9px 11px 8px; user-select: none; width: 148px; z-index: 3; transition: box-shadow 0.1s; }
+.cn:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+.cn.sel { border-color: #2563eb !important; box-shadow: 0 0 0 3px #bfdbfe !important; }
+.cn.flow-src { border-color: #059669 !important; box-shadow: 0 0 0 3px #a7f3d0 !important; }
+.cn-name { font-size: 0.81rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.cn-dots { display: flex; gap: 3px; margin-top: 6px; pointer-events: none; }
+.dot { width: 8px; height: 8px; border-radius: 2px; }
+.cn-sc { font-size: 0.64rem; margin-top: 4px; font-weight: 600; pointer-events: none; }
+
+/* Flow SVG */
+#flow-svg { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 2; overflow: visible; }
+
+/* Analysis panel */
+.ap { width: 388px; background: white; border-left: 1px solid #e2e8f0; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; }
+.ap-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; gap: 6px; text-align: center; padding: 20px; }
+.ap-empty p { font-size: 0.81rem; }
+.ap-hd { padding: 13px 14px; border-bottom: 1px solid #f1f5f9; flex-shrink: 0; }
+.ap-hd h3 { font-size: 0.98rem; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.b-tag { font-size: 0.67rem; background: #f1f5f9; color: #64748b; padding: 2px 7px; border-radius: 7px; font-weight: 500; }
+
+/* STRIDE grid */
+.sg { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; padding: 11px; }
+.sc { border-radius: 7px; padding: 10px; border: 2px solid #e2e8f0; cursor: pointer; transition: border-color 0.1s; }
+.sc:hover { border-color: #cbd5e1; }
+.sc.has { border-color: var(--c); background: color-mix(in srgb, var(--c) 5%, white); }
+.sc.open { border-color: var(--c); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 14%, transparent); }
+.sc-l { width: 26px; height: 26px; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 800; color: white; background: var(--c); }
+.sc-n { font-size: 0.75rem; font-weight: 600; margin-top: 5px; }
+.sc-s { font-size: 0.65rem; color: #94a3b8; }
+.sc-p { font-size: 0.69rem; color: #64748b; margin-top: 4px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sc-h { font-size: 0.65rem; color: #94a3b8; margin-top: 4px; }
+.sc.has .sc-h, .sc.open .sc-h { color: var(--c); }
+
+/* Threat form */
+.tf { margin: 0 11px 11px; border-radius: 8px; padding: 13px; border: 1px solid #e2e8f0; background: #fafafa; }
+.tf-hd { font-size: 0.81rem; font-weight: 600; margin-bottom: 11px; display: flex; align-items: center; gap: 6px; }
+.ls { width: 20px; height: 20px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 0.66rem; font-weight: 700; color: white; flex-shrink: 0; }
+.fd { margin-bottom: 9px; }
+.fd label { display: block; font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-bottom: 4px; }
+.fd textarea { width: 100%; padding: 8px 9px; border: 1px solid #e2e8f0; border-radius: 5px; font-size: 0.79rem; font-family: inherit; resize: vertical; min-height: 66px; background: white; color: #1e293b; line-height: 1.45; }
+.fd textarea:focus { outline: none; border-color: #2563eb; }
+
+/* DREAD */
+.drs { margin-top: 10px; padding-top: 10px; border-top: 1px solid #e2e8f0; }
+.drl { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #64748b; margin-bottom: 7px; display: flex; justify-content: space-between; align-items: center; }
+.dsc { font-size: 0.78rem; font-weight: 700; }
+.dsc.crit { color: #dc2626; }
+.dsc.ok { color: #059669; }
+.dri { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.di { text-align: center; }
+.di label { display: block; font-size: 0.59rem; color: #94a3b8; margin-bottom: 3px; font-weight: 600; }
+.di input { width: 100%; padding: 4px 2px; border: 1px solid #e2e8f0; border-radius: 4px; text-align: center; font-size: 0.8rem; background: white; }
+.di input:focus { outline: none; border-color: #2563eb; }
+.fa { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
+.bs { padding: 5px 12px; border-radius: 5px; border: none; cursor: pointer; font-size: 0.77rem; font-weight: 500; }
+.bs-rm { background: #fee2e2; color: #dc2626; }
+.bs-rm:hover { background: #fecaca; }
+.bs-sv { background: #2563eb; color: white; }
+.bs-sv:hover { background: #1d4ed8; }
+.bs-cl { background: #f1f5f9; color: #64748b; }
+.bs-cl:hover { background: #e2e8f0; }
+
+/* Modals */
+.ov { position: fixed; inset: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.mo { background: white; border-radius: 10px; padding: 20px; width: 340px; box-shadow: 0 16px 50px rgba(0,0,0,0.18); }
+.mo h3 { font-size: 0.9rem; font-weight: 600; margin-bottom: 12px; }
+.mo input, .mo select { width: 100%; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 5px; font-size: 0.85rem; font-family: inherit; margin-bottom: 10px; }
+.mo input:focus, .mo select:focus { outline: none; border-color: #2563eb; }
+.ma { display: flex; gap: 7px; justify-content: flex-end; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">STRIDE</span>
+  <input type="text" id="session-name" placeholder="Namnge analysen…" spellcheck="false" autocomplete="off">
+  <div class="hdr-r">
+    <div class="thr-wrap">
+      <span>DREAD-tröskel</span>
+      <input type="number" id="threshold" min="5" max="50" value="25">
+      <span>/50</span>
+    </div>
+    <button class="btn-h" onclick="exportReport()">Exportera rapport</button>
+  </div>
+</header>
+
+<div class="app">
+  <aside>
+    <div class="sbt">
+      <span>Komponenter</span>
+      <div class="ibs">
+        <button class="bic" title="Lägg till gräns" onclick="openModal('bm')">⬜</button>
+        <button class="bic" title="Lägg till komponent" onclick="openAddComp()">＋</button>
+      </div>
+    </div>
+    <div id="c-list"></div>
+    <div class="sb-sep"></div>
+    <div class="sbt">
+      <span>Flöden</span>
+      <button class="bic" id="flow-sb-btn" title="Lägg till flöde" onclick="toggleFlowMode()">↔</button>
+    </div>
+    <div id="f-list"></div>
+  </aside>
+
+  <div class="map-area">
+    <div class="map-tb">
+      <button class="tb-btn" onclick="openModal('bm')">+ Gräns</button>
+      <button class="tb-btn" onclick="openAddComp()">+ Komponent</button>
+      <button class="tb-btn" id="flow-tb-btn" onclick="toggleFlowMode()">↔ Flöde</button>
+      <span id="flow-hint">Klicka på startnod…</span>
+    </div>
+    <div class="canvas-wrap" id="canvas-wrap">
+      <div class="canvas" id="canvas">
+        <svg id="flow-svg" width="3200" height="2200"></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="ap" id="ap">
+    <div class="ap-empty">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      <p style="color:#64748b;font-weight:500">Välj en komponent</p>
+      <p>Klicka på en nod i kartan</p>
+    </div>
+  </div>
+</div>
+
+<!-- Add boundary -->
+<div class="ov" id="bm" style="display:none" onclick="if(event.target===this)closeModal('bm')">
+  <div class="mo">
+    <h3>Lägg till gräns</h3>
+    <input type="text" id="b-name" placeholder="t.ex. Externt nätverk, DMZ, Backend…">
+    <div class="ma">
+      <button class="bs bs-cl" onclick="closeModal('bm')">Avbryt</button>
+      <button class="bs bs-sv" onclick="addBoundary()">Lägg till</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add component -->
+<div class="ov" id="cm" style="display:none" onclick="if(event.target===this)closeModal('cm')">
+  <div class="mo">
+    <h3>Lägg till komponent</h3>
+    <input type="text" id="c-name" placeholder="t.ex. API, Databas, Klient, Meddelandekö…">
+    <select id="c-bid"><option value="">Ingen gräns</option></select>
+    <div class="ma">
+      <button class="bs bs-cl" onclick="closeModal('cm')">Avbryt</button>
+      <button class="bs bs-sv" onclick="addComponent()">Lägg till</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const NW = 148, NH = 62;
+
+const CATS = [
+  { id:'S', name:'Spoofing',               sub:'Falsk identitet',       color:'#dc2626' },
+  { id:'T', name:'Tampering',              sub:'Otillåten ändring',     color:'#ea580c' },
+  { id:'R', name:'Repudiation',            sub:'Brist på spårbarhet',   color:'#ca8a04' },
+  { id:'I', name:'Information Disclosure', sub:'Informationsläckage',   color:'#2563eb' },
+  { id:'D', name:'Denial of Service',      sub:'Otillgänglighet',       color:'#7c3aed' },
+  { id:'E', name:'Elevation of Privilege', sub:'Otillåten behörighet',  color:'#059669' },
+];
+
+const DREAD = [
+  { id:'dmg', label:'Damage'    },
+  { id:'rep', label:'Repro.'    },
+  { id:'aff', label:'Affected'  },
+  { id:'exp', label:'Exploit.'  },
+  { id:'dis', label:'Discov.'   },
+];
+
+// ── State ──────────────────────────────────────────────────────────────
+function fresh() {
+  return { name:'', boundaries:[], components:[], threats:{}, pos:{}, bpos:{}, flows:[], threshold:25 };
+}
+
+let state = (() => {
+  try {
+    const s = JSON.parse(localStorage.getItem('stride') || 'null');
+    if (!s) return fresh();
+    return { ...fresh(), ...s, threshold: s.threshold ?? 25 };
+  } catch { return fresh(); }
+})();
+
+function persist() { localStorage.setItem('stride', JSON.stringify(state)); }
+
+let selected = null;
+let editing  = null;  // { compId, catId }
+let flowMode = false;
+let flowFrom = null;
+
+// ── Helpers ────────────────────────────────────────────────────────────
+const uid  = () => Math.random().toString(36).slice(2, 9);
+const esc  = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const tkey = (cid, cat) => `${cid}_${cat}`;
+const getT = (cid, cat) => state.threats[tkey(cid, cat)];
+const cnt  = cid => CATS.filter(c => getT(cid, c.id)).length;
+
+function getPos(id) {
+  if (!state.pos[id]) {
+    const idx = state.components.findIndex(c => c.id === id);
+    state.pos[id] = { x: 80 + (idx % 5) * 190, y: 80 + Math.floor(idx / 5) * 160 };
+  }
+  return state.pos[id];
+}
+
+function getBPos(bid) {
+  if (!state.bpos[bid]) {
+    const idx = state.boundaries.findIndex(b => b.id === bid);
+    state.bpos[bid] = { x: 40, y: 40 + idx * 290, w: 370, h: 250 };
+  }
+  return state.bpos[bid];
+}
+
+function dreadSum(t) {
+  if (!t?.dread) return 0;
+  return DREAD.reduce((s, d) => s + (Number(t.dread[d.id]) || 0), 0);
+}
+
+function maxDread(cid) {
+  const scores = CATS.map(c => dreadSum(getT(cid, c.id))).filter(s => s > 0);
+  return scores.length ? Math.max(...scores) : 0;
+}
+
+// ── Sidebar ────────────────────────────────────────────────────────────
+function renderSidebar() {
+  const grouped = {};
+  state.components.forEach(c => { const k = c.bid || '_'; (grouped[k] = grouped[k] || []).push(c); });
+  const order = [...state.boundaries.map(b => b.id), '_'];
+  let html = '';
+  for (const bid of order) {
+    const comps = grouped[bid] || [];
+    const b = state.boundaries.find(b => b.id === bid);
+    html += '<div class="bg">';
+    if (b) html += `<div class="bl">${esc(b.name)}<button class="x" onclick="delBoundary('${bid}')">✕</button></div>`;
+    for (const c of comps) {
+      const n = cnt(c.id);
+      const ms = maxDread(c.id);
+      const crit = ms > 0 && ms >= state.threshold;
+      html += `<div class="ci${selected===c.id?' sel':''}" onclick="selectComp('${c.id}')">
+        <span class="nm">${esc(c.name)}</span>
+        ${n > 0 ? `<span class="bd" style="${crit?'background:#fee2e2;color:#dc2626':''}">${n}</span>` : ''}
+        <button class="x" onclick="event.stopPropagation();delComponent('${c.id}')">✕</button>
+      </div>`;
+    }
+    html += '</div>';
+  }
+  document.getElementById('c-list').innerHTML = html;
+
+  let fhtml = '';
+  for (const f of state.flows) {
+    const from = state.components.find(c => c.id === f.from);
+    const to   = state.components.find(c => c.id === f.to);
+    if (!from || !to) continue;
+    const lbl = f.label ? ` (${esc(f.label)})` : '';
+    fhtml += `<div class="fi">
+      <span class="fl">${esc(from.name)} → ${esc(to.name)}${lbl}</span>
+      <button class="x" onclick="delFlow('${f.id}')">✕</button>
+    </div>`;
+  }
+  document.getElementById('f-list').innerHTML = fhtml;
+}
+
+// ── Canvas ─────────────────────────────────────────────────────────────
+function renderCanvas() {
+  const canvas = document.getElementById('canvas');
+  const svg    = document.getElementById('flow-svg');
+  for (const el of [...canvas.children]) { if (el !== svg) el.remove(); }
+
+  // Boundary zones
+  for (const b of state.boundaries) {
+    const p = getBPos(b.id);
+    const el = document.createElement('div');
+    el.className = 'bz';
+    el.style.cssText = `left:${p.x}px;top:${p.y}px;width:${p.w}px;height:${p.h}px`;
+
+    const hdr = document.createElement('div');
+    hdr.className = 'bz-hdr';
+    hdr.innerHTML = `<span class="bz-nm">${esc(b.name)}</span><button class="bz-del" onclick="delBoundary('${b.id}')">✕</button>`;
+    hdr.addEventListener('mousedown', e => {
+      if (e.target.tagName === 'BUTTON') return;
+      startDrag(e, 'bnd', b.id);
+    });
+
+    const rsz = document.createElement('div');
+    rsz.className = 'bz-rsz';
+    rsz.textContent = '⤡';
+    rsz.addEventListener('mousedown', e => { e.stopPropagation(); startDrag(e, 'brsz', b.id); });
+
+    el.appendChild(hdr);
+    el.appendChild(rsz);
+    canvas.appendChild(el);
+  }
+
+  // Component nodes
+  for (const c of state.components) {
+    const p = getPos(c.id);
+    const ms = maxDread(c.id);
+    const isCrit = ms > 0 && ms >= state.threshold;
+    const isSel  = selected === c.id;
+    const isSrc  = flowFrom === c.id;
+
+    const el = document.createElement('div');
+    el.className = 'cn' + (isSel ? ' sel' : isSrc ? ' flow-src' : '');
+    if (!isSel && !isSrc) {
+      if (isCrit)    el.style.borderColor = '#dc2626';
+      else if (ms > 0) el.style.borderColor = '#f97316';
+    }
+    el.style.left = p.x + 'px';
+    el.style.top  = p.y + 'px';
+
+    const dots = CATS.map(cat => {
+      const t = getT(c.id, cat.id);
+      return `<div class="dot" style="background:${t ? cat.color : '#e2e8f0'}" title="${cat.name}"></div>`;
+    }).join('');
+
+    const scoreHtml = ms > 0
+      ? `<div class="cn-sc" style="color:${isCrit?'#dc2626':'#94a3b8'}">${isCrit?'⚠ ':''}${ms}/50</div>`
+      : '';
+
+    el.innerHTML = `<div class="cn-name">${esc(c.name)}</div><div class="cn-dots">${dots}</div>${scoreHtml}`;
+
+    let wasDragged = false;
+    el.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      wasDragged = false;
+      startDrag(e, 'comp', c.id);
+    });
+    el.addEventListener('click', () => { if (!wasDragged) onNodeClick(c.id); });
+    // Expose wasDragged to drag system via closure reference on element
+    el._setDragged = v => { wasDragged = v; };
+
+    canvas.appendChild(el);
+  }
+
+  renderFlows(svg);
+}
+
+function renderFlows(svg) {
+  const defs = `<defs><marker id="arr" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
+    <polygon points="0 0,9 3,0 6" fill="#94a3b8"/>
+  </marker></defs>`;
+  let paths = '';
+  for (const f of state.flows) {
+    const fp = state.pos[f.from], tp = state.pos[f.to];
+    if (!fp || !tp) continue;
+    const fcx = fp.x + NW/2, fcy = fp.y + NH/2;
+    const tcx = tp.x + NW/2, tcy = tp.y + NH/2;
+    const s = edgePt(fcx, fcy, NW, NH, tcx, tcy);
+    const e = edgePt(tcx, tcy, NW, NH, fcx, fcy);
+    const mx = (s.x+e.x)/2, my = (s.y+e.y)/2 - 7;
+    paths += `<line x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${e.x.toFixed(1)}" y2="${e.y.toFixed(1)}" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr)"/>`;
+    if (f.label) paths += `<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" text-anchor="middle" font-size="11" fill="#64748b" font-family="system-ui,sans-serif">${esc(f.label)}</text>`;
+  }
+  svg.innerHTML = defs + paths;
+}
+
+function edgePt(cx, cy, w, h, tx, ty) {
+  const dx = tx - cx, dy = ty - cy;
+  if (!dx && !dy) return { x: cx, y: cy };
+  const sx = dx ? (w/2 + 3) / Math.abs(dx) : Infinity;
+  const sy = dy ? (h/2 + 3) / Math.abs(dy) : Infinity;
+  const s  = Math.min(sx, sy);
+  return { x: cx + dx*s, y: cy + dy*s };
+}
+
+// ── Analysis panel ─────────────────────────────────────────────────────
+function renderPanel() {
+  const ap = document.getElementById('ap');
+  if (!selected) {
+    ap.innerHTML = `<div class="ap-empty">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+      <p style="color:#64748b;font-weight:500">Välj en komponent</p>
+      <p>Klicka på en nod i kartan</p>
+    </div>`;
+    return;
+  }
+  const comp = state.components.find(c => c.id === selected);
+  if (!comp) { selected = null; renderPanel(); return; }
+  const boundary = comp.bid ? state.boundaries.find(b => b.id === comp.bid) : null;
+
+  let grid = '<div class="sg">';
+  for (const cat of CATS) {
+    const t = getT(comp.id, cat.id);
+    const isOpen = editing && editing.compId === comp.id && editing.catId === cat.id;
+    grid += `<div class="sc${t?' has':''}${isOpen?' open':''}" style="--c:${cat.color}" onclick="toggleEdit('${comp.id}','${cat.id}')">
+      <div class="sc-l">${cat.id}</div>
+      <div class="sc-n">${cat.name}</div>
+      <div class="sc-s">${cat.sub}</div>
+      ${t?.description ? `<div class="sc-p">${esc(t.description)}</div>` : ''}
+      <div class="sc-h">${isOpen ? 'Redigerar…' : t ? 'Redigera' : 'Lägg till'}</div>
+    </div>`;
+  }
+  grid += '</div>';
+
+  let form = '';
+  if (editing && editing.compId === comp.id) {
+    const cat   = CATS.find(c => c.id === editing.catId);
+    const t     = getT(comp.id, cat.id) || {};
+    const dr    = t.dread || {};
+    const score = dreadSum(t);
+    const isCrit = score > 0 && score >= state.threshold;
+    const dinputs = DREAD.map(d => `<div class="di">
+      <label>${d.label}</label>
+      <input type="number" id="dr-${d.id}" min="1" max="10" value="${dr[d.id]||''}" placeholder="–" oninput="liveScore()">
+    </div>`).join('');
+    const hasContent = t.description || t.controls || t.gaps || score > 0;
+    form = `<div class="tf">
+      <div class="tf-hd"><div class="ls" style="background:${cat.color}">${cat.id}</div>${cat.name} – ${esc(comp.name)}</div>
+      <div class="fd"><label>Hur är attackvektorn möjlig?</label>
+        <textarea id="f-desc" placeholder="Beskriv hur en angripare kan utnyttja detta…">${esc(t.description||'')}</textarea>
+      </div>
+      <div class="fd"><label>Befintliga skydd</label>
+        <textarea id="f-ctrl" placeholder="Vilka skydd finns redan?">${esc(t.controls||'')}</textarea>
+      </div>
+      <div class="fd"><label>Luckor och brister</label>
+        <textarea id="f-gaps" placeholder="Vad saknas eller är otillräckligt?">${esc(t.gaps||'')}</textarea>
+      </div>
+      <div class="drs">
+        <div class="drl">DREAD-poäng
+          <span id="score-lbl" class="dsc${isCrit?' crit':score>0?' ok':''}">${score>0?score+'/50':''}</span>
+        </div>
+        <div class="dri">${dinputs}</div>
+      </div>
+      <div class="fa">
+        ${hasContent ? `<button class="bs bs-rm" onclick="removeThreat('${comp.id}','${cat.id}')">Ta bort</button>` : ''}
+        <button class="bs bs-cl" onclick="closeEdit()">Stäng</button>
+        <button class="bs bs-sv" onclick="saveThreat('${comp.id}','${cat.id}')">Spara</button>
+      </div>
+    </div>`;
+  }
+
+  ap.innerHTML = `<div class="ap-hd"><h3>${esc(comp.name)}${boundary?`<span class="b-tag">${esc(boundary.name)}</span>`:''}</h3></div>${grid}${form}`;
+  if (editing) setTimeout(() => document.getElementById('f-desc')?.focus(), 40);
+}
+
+function liveScore() {
+  const score = DREAD.reduce((s, d) => {
+    const v = parseInt(document.getElementById('dr-'+d.id)?.value || '0');
+    return s + (v >= 1 && v <= 10 ? v : 0);
+  }, 0);
+  const lbl = document.getElementById('score-lbl');
+  if (!lbl) return;
+  lbl.textContent = score > 0 ? score + '/50' : '';
+  lbl.className = 'dsc' + (score >= state.threshold && score > 0 ? ' crit' : score > 0 ? ' ok' : '');
+}
+
+// ── Interactions ───────────────────────────────────────────────────────
+function onNodeClick(id) {
+  if (flowMode) {
+    if (!flowFrom) {
+      flowFrom = id;
+      document.getElementById('flow-hint').textContent = 'Klicka på målnod…';
+      renderCanvas();
+    } else if (flowFrom !== id) {
+      const labelInput = prompt('Flödets namn/beskrivning (valfritt):');
+      if (labelInput === null) return;
+      state.flows.push({ id: uid(), from: flowFrom, to: id, label: labelInput.trim() });
+      persist();
+      exitFlowMode();
+    }
+    return;
+  }
+  selected = id; editing = null;
+  renderCanvas(); renderPanel(); renderSidebar();
+}
+
+function selectComp(id) {
+  selected = id; editing = null;
+  renderCanvas(); renderPanel(); renderSidebar();
+}
+
+function toggleEdit(compId, catId) {
+  editing = (editing && editing.compId === compId && editing.catId === catId) ? null : { compId, catId };
+  renderPanel();
+}
+
+function saveThreat(compId, catId) {
+  const dread = {};
+  DREAD.forEach(d => {
+    const v = parseInt(document.getElementById('dr-'+d.id)?.value || '0');
+    if (v >= 1 && v <= 10) dread[d.id] = v;
+  });
+  state.threats[tkey(compId, catId)] = {
+    description: document.getElementById('f-desc').value.trim(),
+    controls:    document.getElementById('f-ctrl').value.trim(),
+    gaps:        document.getElementById('f-gaps').value.trim(),
+    dread,
+  };
+  persist(); editing = null;
+  renderCanvas(); renderPanel(); renderSidebar();
+}
+
+function removeThreat(compId, catId) {
+  delete state.threats[tkey(compId, catId)];
+  persist(); editing = null;
+  renderCanvas(); renderPanel(); renderSidebar();
+}
+
+function closeEdit() { editing = null; renderPanel(); }
+
+// ── Flow mode ──────────────────────────────────────────────────────────
+function toggleFlowMode() { flowMode ? exitFlowMode() : enterFlowMode(); }
+
+function enterFlowMode() {
+  flowMode = true; flowFrom = null;
+  document.getElementById('flow-hint').style.display = '';
+  document.getElementById('flow-hint').textContent = 'Klicka på startnod…';
+  document.getElementById('flow-tb-btn').classList.add('on');
+  document.getElementById('flow-sb-btn').classList.add('on');
+  document.getElementById('canvas-wrap').classList.add('flow-mode');
+}
+
+function exitFlowMode() {
+  flowMode = false; flowFrom = null;
+  document.getElementById('flow-hint').style.display = 'none';
+  document.getElementById('flow-tb-btn').classList.remove('on');
+  document.getElementById('flow-sb-btn').classList.remove('on');
+  document.getElementById('canvas-wrap').classList.remove('flow-mode');
+  renderCanvas(); renderSidebar();
+}
+
+// ── Drag ───────────────────────────────────────────────────────────────
+let drag = null;
+let activeCnEl = null;
+
+function startDrag(e, type, id) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (type === 'comp') {
+    const p = getPos(id);
+    drag = { type, id, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
+    activeCnEl = e.currentTarget || e.target.closest('.cn');
+  } else if (type === 'bnd') {
+    const p = getBPos(id);
+    drag = { type, id, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
+  } else if (type === 'brsz') {
+    const p = getBPos(id);
+    drag = { type, id, sx: e.clientX, sy: e.clientY, ow: p.w, oh: p.h };
+  }
+}
+
+let rafId = null;
+document.addEventListener('mousemove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+  const moved = Math.abs(dx) > 2 || Math.abs(dy) > 2;
+
+  if (drag.type === 'comp') {
+    if (moved && activeCnEl?._setDragged) activeCnEl._setDragged(true);
+    state.pos[drag.id] = { x: drag.ox + dx, y: drag.oy + dy };
+  } else if (drag.type === 'bnd') {
+    const p = getBPos(drag.id);
+    state.bpos[drag.id] = { ...p, x: drag.ox + dx, y: drag.oy + dy };
+  } else if (drag.type === 'brsz') {
+    const p = getBPos(drag.id);
+    state.bpos[drag.id] = { ...p, w: Math.max(120, drag.ow + dx), h: Math.max(70, drag.oh + dy) };
+  }
+
+  if (!rafId) rafId = requestAnimationFrame(() => { rafId = null; renderCanvas(); });
+});
+
+document.addEventListener('mouseup', () => {
+  if (drag) { persist(); drag = null; activeCnEl = null; }
+});
+
+// ── Boundary CRUD ──────────────────────────────────────────────────────
+function addBoundary() {
+  const name = document.getElementById('b-name').value.trim();
+  if (!name) return;
+  state.boundaries.push({ id: uid(), name });
+  persist(); closeModal('bm');
+  renderCanvas(); renderSidebar();
+}
+
+function delBoundary(bid) {
+  if (!confirm('Ta bort gränsen? Komponenter förlorar sin tillhörighet.')) return;
+  state.boundaries = state.boundaries.filter(b => b.id !== bid);
+  delete state.bpos[bid];
+  state.components.forEach(c => { if (c.bid === bid) c.bid = null; });
+  persist(); renderCanvas(); renderSidebar();
+}
+
+// ── Component CRUD ─────────────────────────────────────────────────────
+function openAddComp() {
+  document.getElementById('c-name').value = '';
+  document.getElementById('c-bid').innerHTML =
+    '<option value="">Ingen gräns</option>' +
+    state.boundaries.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  openModal('cm');
+}
+
+function addComponent() {
+  const name = document.getElementById('c-name').value.trim();
+  if (!name) return;
+  const bid = document.getElementById('c-bid').value || null;
+  const id  = uid();
+  state.components.push({ id, name, bid });
+  const idx = state.components.length - 1;
+  state.pos[id] = { x: 80 + (idx % 5) * 190, y: 80 + Math.floor(idx / 5) * 160 };
+  persist(); closeModal('cm');
+  selected = id; editing = null;
+  renderCanvas(); renderPanel(); renderSidebar();
+}
+
+function delComponent(id) {
+  if (!confirm('Ta bort komponenten och alla registrerade hot?')) return;
+  state.components = state.components.filter(c => c.id !== id);
+  CATS.forEach(cat => delete state.threats[tkey(id, cat.id)]);
+  state.flows = state.flows.filter(f => f.from !== id && f.to !== id);
+  delete state.pos[id];
+  if (selected === id) { selected = null; editing = null; }
+  persist(); renderCanvas(); renderPanel(); renderSidebar();
+}
+
+function delFlow(id) {
+  state.flows = state.flows.filter(f => f.id !== id);
+  persist(); renderCanvas(); renderSidebar();
+}
+
+// ── Modals ─────────────────────────────────────────────────────────────
+function openModal(id) {
+  document.getElementById(id).style.display = 'flex';
+  setTimeout(() => document.querySelector('#'+id+' input')?.focus(), 40);
+}
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+document.getElementById('b-name').addEventListener('keydown', e => { if (e.key==='Enter') addBoundary(); });
+document.getElementById('c-name').addEventListener('keydown', e => { if (e.key==='Enter') addComponent(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closeModal('bm'); closeModal('cm');
+    if (flowMode) exitFlowMode(); else closeEdit();
+  }
+});
+
+document.getElementById('session-name').addEventListener('input', e => { state.name = e.target.value; persist(); });
+document.getElementById('threshold').addEventListener('change', e => {
+  state.threshold = Math.max(5, Math.min(50, parseInt(e.target.value) || 25));
+  persist(); renderCanvas(); renderSidebar();
+});
+
+// ── Export ─────────────────────────────────────────────────────────────
+function exportReport() {
+  const sessionName = state.name || 'STRIDE Analys';
+  const date = new Date().toLocaleDateString('sv-SE', {year:'numeric', month:'long', day:'numeric'});
+  let totalThreats = 0, critThreats = 0;
+
+  let flowSection = '';
+  if (state.flows.length > 0) {
+    const frows = state.flows.map(f => {
+      const from = state.components.find(c => c.id === f.from);
+      const to   = state.components.find(c => c.id === f.to);
+      if (!from || !to) return '';
+      return `<tr><td>${esc(from.name)}</td><td style="color:#94a3b8">→</td><td>${esc(to.name)}</td><td>${esc(f.label||'–')}</td></tr>`;
+    }).join('');
+    flowSection = `<section><div class="ch"><h2>Informationsflöden</h2></div>
+      <table><thead><tr><th>Från</th><th></th><th>Till</th><th>Beskrivning</th></tr></thead><tbody>${frows}</tbody></table>
+    </section>`;
+  }
+
+  let sections = '';
+  for (const comp of state.components) {
+    const boundary = comp.bid ? state.boundaries.find(b => b.id === comp.bid) : null;
+    const threats  = CATS.filter(cat => getT(comp.id, cat.id));
+    let rows = '';
+    for (const cat of threats) {
+      const t = getT(comp.id, cat.id);
+      const score = dreadSum(t);
+      const crit  = score > 0 && score >= state.threshold;
+      totalThreats++; if (crit) critThreats++;
+      const dvals = DREAD.map(d => `<td style="text-align:center">${t.dread?.[d.id]||'–'}</td>`).join('');
+      rows += `<tr style="${crit?'background:#fff5f5':''}">
+        <td><span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:${cat.color};color:white;font-size:.68rem;font-weight:800;margin-right:5px;vertical-align:middle">${cat.id}</span><strong>${cat.name}</strong>${crit?' <span style="color:#dc2626">⚠</span>':''}</td>
+        <td>${esc(t.description||'–')}</td><td>${esc(t.controls||'–')}</td><td>${esc(t.gaps||'–')}</td>
+        ${dvals}
+        <td style="text-align:center;font-weight:700;color:${crit?'#dc2626':score>0?'#059669':'#94a3b8'}">${score||'–'}</td>
+      </tr>`;
+    }
+    sections += `<section><div class="ch">
+        <h2>${esc(comp.name)}</h2>
+        ${boundary?`<span class="tg">${esc(boundary.name)}</span>`:''}
+        <span class="tg" style="background:#f1f5f9;color:#64748b">${threats.length} hot</span>
+      </div>
+      ${threats.length===0 ? '<p class="et">Inga hot identifierade.</p>' :
+        `<table><thead><tr><th>Kategori</th><th>Hur möjlig</th><th>Befintliga skydd</th><th>Luckor</th><th title="Damage">D</th><th title="Reproducibility">R</th><th title="Affected users">A</th><th title="Exploitability">E</th><th title="Discoverability">Disc</th><th>Summa</th></tr></thead><tbody>${rows}</tbody></table>`}
+    </section>`;
+  }
+
+  const html = `<!DOCTYPE html><html lang="sv"><head><meta charset="UTF-8"><title>${esc(sessionName)}</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:48px 24px;color:#1e293b}
+h1{font-size:1.8rem;font-weight:800}.meta{color:#64748b;font-size:.875rem;margin:6px 0 32px;padding-bottom:18px;border-bottom:2px solid #f1f5f9}
+.stats{display:flex;gap:18px;margin-bottom:36px;flex-wrap:wrap}
+.stat{padding:14px 22px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0}
+.stat-n{font-size:1.8rem;font-weight:800}.stat-l{font-size:.73rem;color:#64748b}
+section{margin-bottom:26px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden}
+.ch{padding:11px 16px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ch h2{font-size:1rem;font-weight:700;margin:0}
+.tg{font-size:.67rem;background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:7px;font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th{text-align:left;padding:8px 13px;font-size:.63rem;text-transform:uppercase;letter-spacing:.05em;color:#64748b;background:#fafafa;border-bottom:1px solid #e2e8f0}
+td{padding:9px 13px;border-bottom:1px solid #f1f5f9;vertical-align:top;line-height:1.45}
+tr:last-child td{border-bottom:none}
+.et{padding:13px 16px;color:#94a3b8;font-size:.85rem;margin:0}
+@media print{body{padding:20px}}
+</style></head><body>
+<h1>${esc(sessionName)}</h1>
+<div class="meta">STRIDE Hotbildsanalys · ${date}</div>
+<div class="stats">
+  <div class="stat"><div class="stat-n">${state.components.length}</div><div class="stat-l">Komponenter</div></div>
+  <div class="stat"><div class="stat-n">${state.flows.length}</div><div class="stat-l">Flöden</div></div>
+  <div class="stat"><div class="stat-n">${totalThreats}</div><div class="stat-l">Hot dokumenterade</div></div>
+  <div class="stat" style="background:${critThreats>0?'#fff5f5':'#f0fdf4'};border-color:${critThreats>0?'#fecaca':'#bbf7d0'}">
+    <div class="stat-n" style="color:${critThreats>0?'#dc2626':'#059669'}">${critThreats}</div>
+    <div class="stat-l">Kritiska (DREAD ≥${state.threshold})</div>
+  </div>
+  <div class="stat"><div class="stat-n">${state.boundaries.length}</div><div class="stat-l">Trust boundaries</div></div>
+</div>
+${flowSection}${sections}
+</body></html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { alert('Popup blockerades – tillåt popups för att exportera.'); return; }
+  win.document.write(html); win.document.close();
+}
+
+// ── Init ───────────────────────────────────────────────────────────────
+document.getElementById('session-name').value = state.name;
+document.getElementById('threshold').value    = state.threshold;
+renderCanvas(); renderPanel(); renderSidebar();
+</script>
+</body>
+</html>
