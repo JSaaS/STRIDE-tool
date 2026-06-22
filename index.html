@@ -151,6 +151,8 @@ aside { width: 214px; background: white; border-right: 1px solid #e2e8f0; displa
       <input type="number" id="threshold" min="5" max="50" value="25">
       <span>/50</span>
     </div>
+    <button class="btn-h" onclick="saveModel()">Spara analys</button>
+    <button class="btn-h" onclick="openModel()">Öppna analys</button>
     <button class="btn-h" onclick="exportReport()">Exportera rapport</button>
   </div>
 </header>
@@ -712,6 +714,45 @@ document.getElementById('threshold').addEventListener('change', e => {
   state.threshold = Math.max(5, Math.min(50, parseInt(e.target.value) || 25));
   persist(); renderCanvas(); renderSidebar();
 });
+
+// ── Spara / Öppna ──────────────────────────────────────────────────────
+function saveModel() {
+  const data = JSON.stringify({ app:'stride-tool', version:1, state }, null, 2);
+  const safe = (state.name || 'stride').replace(/[^a-z0-9åäö_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'stride';
+  const fname = `${safe}-${new Date().toLocaleDateString('sv-SE')}.json`;
+  const url = URL.createObjectURL(new Blob([data], { type:'application/json' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = fname; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function openModel() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.json,application/json';
+  inp.onchange = () => {
+    const file = inp.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let obj;
+      try { obj = JSON.parse(reader.result); }
+      catch { alert('Kunde inte läsa filen: ogiltig JSON.'); return; }
+      if (!obj || obj.app !== 'stride-tool' || typeof obj.state !== 'object' || !obj.state) {
+        alert('Fel filtyp – detta är inte en STRIDE-analysfil.'); return;
+      }
+      const hasData = state.components.length || state.boundaries.length || state.flows.length || Object.keys(state.threats).length;
+      if (hasData && !confirm('Detta ersätter din nuvarande analys och kan inte ångras. Spara den först om du vill behålla den. Fortsätta?')) return;
+      state = { ...fresh(), ...obj.state, threshold: obj.state.threshold ?? 25 };
+      selected = null; editing = null; flowMode = false; flowFrom = null;
+      persist();
+      document.getElementById('session-name').value = state.name;
+      document.getElementById('threshold').value    = state.threshold;
+      renderCanvas(); renderPanel(); renderSidebar();
+    };
+    reader.readAsText(file);
+  };
+  inp.click();
+}
 
 // ── Export ─────────────────────────────────────────────────────────────
 function exportReport() {
