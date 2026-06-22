@@ -13,3 +13,6 @@ Thumbs.db
 # Logs & temp
 *.log
 *.tmp
+
+# Claude Code – lokal maskin-config (agentdefinitioner versionshanteras)
+.claude/settings.local.json
