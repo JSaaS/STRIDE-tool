@@ -248,10 +248,33 @@ function fresh() {
   return { name:'', boundaries:[], components:[], threats:{}, pos:{}, bpos:{}, flows:[], threshold:25 };
 }
 
+function sane(s) {
+  const id  = v => typeof v === 'string' && /^[a-z0-9]{1,9}$/.test(v);
+  const num = v => typeof v === 'number' && Number.isFinite(v);
+  const obj = v => v != null && typeof v === 'object' && !Array.isArray(v);
+  if (['boundaries','components','flows'].some(k => s[k] != null && !Array.isArray(s[k]))) return false;
+  if (['threats','pos','bpos'].some(k => s[k] != null && !obj(s[k]))) return false;
+  if ((s.boundaries || []).some(b => !id(b?.id))) return false;
+  if ((s.components || []).some(c => !id(c?.id) || (c?.bid != null && !id(c.bid)))) return false;
+  if ((s.flows || []).some(f => !id(f?.id) || !id(f?.from) || !id(f?.to))) return false;
+  if (Object.entries(s.pos || {}).some(([k, p]) => !id(k) || !obj(p) || !num(p.x) || !num(p.y))) return false;
+  if (Object.entries(s.bpos || {}).some(([k, p]) => !id(k) || !obj(p) || !num(p.x) || !num(p.y) || !num(p.w) || !num(p.h))) return false;
+  if (Object.entries(s.threats || {}).some(([k, t]) => !/^[a-z0-9]{1,9}_[STRIDE]$/.test(k) || !obj(t) ||
+      (t.dread != null && (!obj(t.dread) || Object.values(t.dread).some(v => !Number.isInteger(v) || v < 1 || v > 10))))) return false;
+  if (s.threshold != null && !(num(s.threshold) && s.threshold >= 5 && s.threshold <= 50)) return false;
+  return true;
+}
+
 let state = (() => {
   try {
-    const s = JSON.parse(localStorage.getItem('stride') || 'null');
+    const raw = localStorage.getItem('stride');
+    const s = JSON.parse(raw || 'null');
     if (!s) return fresh();
+    if (!sane(s)) {
+      localStorage.setItem('stride_bak', raw);
+      alert('Sparad analys kunde inte läsas in och har lagts åt sidan. Den finns kvar under nyckeln "stride_bak" i localStorage.');
+      return fresh();
+    }
     return { ...fresh(), ...s, threshold: s.threshold ?? 25 };
   } catch { return fresh(); }
 })();
@@ -265,7 +288,7 @@ let flowFrom = null;
 
 // ── Helpers ────────────────────────────────────────────────────────────
 const uid  = () => Math.random().toString(36).slice(2, 9);
-const esc  = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const esc  = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const tkey = (cid, cat) => `${cid}_${cat}`;
 const getT = (cid, cat) => state.threats[tkey(cid, cat)];
 const cnt  = cid => CATS.filter(c => getT(cid, c.id)).length;
@@ -306,15 +329,15 @@ function renderSidebar() {
     const comps = grouped[bid] || [];
     const b = state.boundaries.find(b => b.id === bid);
     html += '<div class="bg">';
-    if (b) html += `<div class="bl">${esc(b.name)}<button class="x" onclick="delBoundary('${bid}')">✕</button></div>`;
+    if (b) html += `<div class="bl">${esc(b.name)}<button class="x" onclick="delBoundary('${esc(bid)}')">✕</button></div>`;
     for (const c of comps) {
       const n = cnt(c.id);
       const ms = maxDread(c.id);
       const crit = ms > 0 && ms >= state.threshold;
-      html += `<div class="ci${selected===c.id?' sel':''}" onclick="selectComp('${c.id}')">
+      html += `<div class="ci${selected===c.id?' sel':''}" onclick="selectComp('${esc(c.id)}')">
         <span class="nm">${esc(c.name)}</span>
         ${n > 0 ? `<span class="bd" style="${crit?'background:#fee2e2;color:#dc2626':''}">${n}</span>` : ''}
-        <button class="x" onclick="event.stopPropagation();delComponent('${c.id}')">✕</button>
+        <button class="x" onclick="event.stopPropagation();delComponent('${esc(c.id)}')">✕</button>
       </div>`;
     }
     html += '</div>';
@@ -329,7 +352,7 @@ function renderSidebar() {
     const lbl = f.label ? ` (${esc(f.label)})` : '';
     fhtml += `<div class="fi">
       <span class="fl">${esc(from.name)} → ${esc(to.name)}${lbl}</span>
-      <button class="x" onclick="delFlow('${f.id}')">✕</button>
+      <button class="x" onclick="delFlow('${esc(f.id)}')">✕</button>
     </div>`;
   }
   document.getElementById('f-list').innerHTML = fhtml;
@@ -350,7 +373,7 @@ function renderCanvas() {
 
     const hdr = document.createElement('div');
     hdr.className = 'bz-hdr';
-    hdr.innerHTML = `<span class="bz-nm">${esc(b.name)}</span><button class="bz-del" onclick="delBoundary('${b.id}')">✕</button>`;
+    hdr.innerHTML = `<span class="bz-nm">${esc(b.name)}</span><button class="bz-del" onclick="delBoundary('${esc(b.id)}')">✕</button>`;
     hdr.addEventListener('mousedown', e => {
       if (e.target.tagName === 'BUTTON') return;
       startDrag(e, 'bnd', b.id);
@@ -457,7 +480,7 @@ function renderPanel() {
   for (const cat of CATS) {
     const t = getT(comp.id, cat.id);
     const isOpen = editing && editing.compId === comp.id && editing.catId === cat.id;
-    grid += `<div class="sc${t?' has':''}${isOpen?' open':''}" style="--c:${cat.color}" onclick="toggleEdit('${comp.id}','${cat.id}')">
+    grid += `<div class="sc${t?' has':''}${isOpen?' open':''}" style="--c:${cat.color}" onclick="toggleEdit('${esc(comp.id)}','${cat.id}')">
       <div class="sc-l">${cat.id}</div>
       <div class="sc-n">${cat.name}</div>
       <div class="sc-s">${cat.sub}</div>
@@ -497,9 +520,9 @@ function renderPanel() {
         <div class="dri">${dinputs}</div>
       </div>
       <div class="fa">
-        ${hasContent ? `<button class="bs bs-rm" onclick="removeThreat('${comp.id}','${cat.id}')">Ta bort</button>` : ''}
+        ${hasContent ? `<button class="bs bs-rm" onclick="removeThreat('${esc(comp.id)}','${cat.id}')">Ta bort</button>` : ''}
         <button class="bs bs-cl" onclick="closeEdit()">Stäng</button>
-        <button class="bs bs-sv" onclick="saveThreat('${comp.id}','${cat.id}')">Spara</button>
+        <button class="bs bs-sv" onclick="saveThreat('${esc(comp.id)}','${cat.id}')">Spara</button>
       </div>
     </div>`;
   }
@@ -661,7 +684,7 @@ function openAddComp() {
   document.getElementById('c-name').value = '';
   document.getElementById('c-bid').innerHTML =
     '<option value="">Ingen gräns</option>' +
-    state.boundaries.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+    state.boundaries.map(b => `<option value="${esc(b.id)}">${esc(b.name)}</option>`).join('');
   openModal('cm');
 }
 
@@ -740,6 +763,7 @@ function openModel() {
       if (!obj || obj.app !== 'stride-tool' || typeof obj.state !== 'object' || !obj.state) {
         alert('Fel filtyp – detta är inte en STRIDE-analysfil.'); return;
       }
+      if (!sane(obj.state)) { alert('Filen innehåller ogiltiga data och kan inte läsas in. Om filen redigerats för hand: id-fält måste behålla sitt ursprungliga format (a–z, 0–9, max 9 tecken).'); return; }
       const hasData = state.components.length || state.boundaries.length || state.flows.length || Object.keys(state.threats).length;
       if (hasData && !confirm('Detta ersätter din nuvarande analys och kan inte ångras. Spara den först om du vill behålla den. Fortsätta?')) return;
       state = { ...fresh(), ...obj.state, threshold: obj.state.threshold ?? 25 };
