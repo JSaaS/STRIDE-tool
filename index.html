@@ -543,6 +543,23 @@ function liveScore() {
 }
 
 // ── Interactions ───────────────────────────────────────────────────────
+function dirty() {
+  if (!editing) return false;
+  const t = state.threats[tkey(editing.compId, editing.catId)] || {};
+  const cur = id => (document.getElementById(id)?.value || '').trim();
+  if (cur('f-desc') !== (t.description || '')) return true;
+  if (cur('f-ctrl') !== (t.controls || '')) return true;
+  if (cur('f-gaps') !== (t.gaps || '')) return true;
+  const dr = t.dread || {};
+  for (const d of DREAD) {
+    const v = parseInt(document.getElementById('dr-'+d.id)?.value || '0');
+    const now = (v >= 1 && v <= 10) ? v : '';
+    if (now !== (dr[d.id] || '')) return true;
+  }
+  return false;
+}
+const guardDirty = () => !dirty() || confirm('Du har osparade ändringar i hotformuläret. Kasta dem?');
+
 function onNodeClick(id) {
   if (flowMode) {
     if (!flowFrom) {
@@ -558,16 +575,19 @@ function onNodeClick(id) {
     }
     return;
   }
+  if (!guardDirty()) return;
   selected = id; editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
 function selectComp(id) {
+  if (!guardDirty()) return;
   selected = id; editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
 function toggleEdit(compId, catId) {
+  if (editing && !guardDirty()) return;
   editing = (editing && editing.compId === compId && editing.catId === catId) ? null : { compId, catId };
   renderPanel();
 }
@@ -594,7 +614,7 @@ function removeThreat(compId, catId) {
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
-function closeEdit() { editing = null; renderPanel(); }
+function closeEdit() { if (!guardDirty()) return; editing = null; renderPanel(); }
 
 // ── Flow mode ──────────────────────────────────────────────────────────
 function toggleFlowMode() { flowMode ? exitFlowMode() : enterFlowMode(); }
@@ -691,6 +711,7 @@ function openAddComp() {
 function addComponent() {
   const name = document.getElementById('c-name').value.trim();
   if (!name) return;
+  if (!guardDirty()) return;
   const bid = document.getElementById('c-bid').value || null;
   const id  = uid();
   state.components.push({ id, name, bid });
@@ -727,7 +748,9 @@ document.getElementById('b-name').addEventListener('keydown', e => { if (e.key==
 document.getElementById('c-name').addEventListener('keydown', e => { if (e.key==='Enter') addComponent(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    closeModal('bm'); closeModal('cm');
+    const mOpen = document.getElementById('bm').style.display === 'flex'
+               || document.getElementById('cm').style.display === 'flex';
+    if (mOpen) { closeModal('bm'); closeModal('cm'); return; }
     if (flowMode) exitFlowMode(); else closeEdit();
   }
 });
@@ -866,6 +889,7 @@ ${flowSection}${sections}
 // ── Init ───────────────────────────────────────────────────────────────
 document.getElementById('session-name').value = state.name;
 document.getElementById('threshold').value    = state.threshold;
+window.addEventListener('beforeunload', e => { if (dirty()) { e.preventDefault(); e.returnValue = ''; } });
 renderCanvas(); renderPanel(); renderSidebar();
 </script>
 </body>
