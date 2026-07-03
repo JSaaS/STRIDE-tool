@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, tkey, dreadSum, fresh, maxDread, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, tkey, dreadSum, fresh, maxDread, sane, uid, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -45,6 +45,7 @@ test('esc escapar specialtecken', () => {
   assert.equal(M.esc('>'), '&gt;');
   assert.equal(M.esc('"'), '&quot;');
   assert.equal(M.esc('a & b <c> "d"'), 'a &amp; b &lt;c&gt; &quot;d&quot;');
+  assert.equal(M.esc("'"), '&#39;');
 });
 
 test('esc lamnar vanlig text orord', () => {
@@ -100,4 +101,76 @@ test('maxDread ger hogsta DREAD-summan bland kategorier', () => {
 test('maxDread ger 0 nar komponenten saknar hot', () => {
   M.state = M.fresh();
   assert.equal(M.maxDread('nope'), 0);
+});
+
+test('sane godkanner fresh-state', () => {
+  assert.equal(M.sane(M.fresh()), true);
+});
+
+test('sane godkanner tom och partiell state', () => {
+  assert.equal(M.sane({}), true);
+  assert.equal(M.sane({ name:'x', components:[{ id:'abc' }], pos:{} }), true); // utan flows/threats/bpos
+});
+
+test('uid matchar id-formatet', () => {
+  for (let i = 0; i < 50; i++) assert.match(M.uid(), /^[a-z0-9]{1,9}$/);
+});
+
+test('sane godkanner giltig state med data', () => {
+  assert.equal(M.sane({
+    name:'Min analys',
+    boundaries:[{ id:'b1a2c', name:'DMZ' }],
+    components:[{ id:'c0mp1', name:'API', bid:'b1a2c' }, { id:'c0mp2', name:'DB', bid:null }],
+    flows:[{ id:'f1x', from:'c0mp1', to:'c0mp2', label:'SQL' }],
+    threats:{ 'c0mp1_S': { description:'spoofing', dread:{ dmg:1, rep:5, aff:10, exp:7, dis:3 } } },
+    pos:{ c0mp1:{ x:1, y:2 } }, bpos:{ b1a2c:{ x:0, y:0, w:1, h:1 } },
+    threshold:25,
+  }), true);
+});
+
+test('sane avvisar id med citationstecken', () => {
+  assert.equal(M.sane({ ...M.fresh(), boundaries:[{ id:'x" onmouseover="alert(1)" data-x="', name:'x' }] }), false);
+});
+
+test('sane avvisar id med apostrof', () => {
+  assert.equal(M.sane({ ...M.fresh(), components:[{ id:"a'b", name:'x' }] }), false);
+});
+
+test('sane avvisar threats-nyckel med fel format', () => {
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'abc_X': {} } }), false);
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'a"b_S': {} } }), false);
+});
+
+test('sane avvisar fel typ pa faltet', () => {
+  assert.equal(M.sane({ ...M.fresh(), components:{ id:'abc' } }), false);
+  assert.equal(M.sane({ ...M.fresh(), threats:[] }), false);
+});
+
+test('sane avvisar daliga id-varianter', () => {
+  assert.equal(M.sane({ ...M.fresh(), flows:[{ id:'f1', from:'a"b', to:'abc' }] }), false);
+  assert.equal(M.sane({ ...M.fresh(), flows:[{ id:'f1', from:'abc', to:42 }] }), false);
+  assert.equal(M.sane({ ...M.fresh(), pos:{ 'a b':{ x:1, y:2 } } }), false);
+  assert.equal(M.sane({ ...M.fresh(), components:[{ id:'abcdefghij' }] }), false); // 10 tecken
+  assert.equal(M.sane({ ...M.fresh(), boundaries:[{ id:123 }] }), false);
+});
+
+test('sane avvisar ogiltiga dread-varden', () => {
+  const t = d => ({ ...M.fresh(), threats:{ abc_S:{ dread:d } } });
+  assert.equal(M.sane(t({ dmg:'" onfocus=alert(1) autofocus x="' })), false);
+  assert.equal(M.sane(t({ dmg:0 })), false);
+  assert.equal(M.sane(t({ dmg:11 })), false);
+  assert.equal(M.sane({ ...M.fresh(), threats:{ abc_S:null } }), false);
+  assert.equal(M.sane({ ...M.fresh(), threats:{ abc_S:[] } }), false);
+});
+
+test('sane avvisar ogiltig threshold', () => {
+  assert.equal(M.sane({ ...M.fresh(), threshold:'25' }), false);
+  assert.equal(M.sane({ ...M.fresh(), threshold:4 }), false);
+  assert.equal(M.sane({ ...M.fresh(), threshold:51 }), false);
+});
+
+test('sane avvisar ogiltiga pos/bpos-varden', () => {
+  assert.equal(M.sane({ ...M.fresh(), pos:{ abc:{ x:'10', y:2 } } }), false);
+  assert.equal(M.sane({ ...M.fresh(), pos:{ abc:null } }), false);
+  assert.equal(M.sane({ ...M.fresh(), bpos:{ abc:{ x:1, y:2 } } }), false); // saknar w/h
 });
