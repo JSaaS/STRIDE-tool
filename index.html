@@ -122,6 +122,8 @@ aside { width: 214px; background: white; border-right: 1px solid #e2e8f0; displa
 .di label { display: block; font-size: 0.59rem; color: #94a3b8; margin-bottom: 3px; font-weight: 600; }
 .di input { width: 100%; padding: 4px 2px; border: 1px solid #e2e8f0; border-radius: 4px; text-align: center; font-size: 0.8rem; background: white; }
 .di input:focus { outline: none; border-color: #2563eb; }
+.di input.invalid { border-color: #dc2626; background: #fef2f2; }
+.dr-scale { font-size: 0.6rem; color: #94a3b8; margin-bottom: 7px; line-height: 1.35; }
 .fa { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
 .bs { padding: 5px 12px; border-radius: 5px; border: none; cursor: pointer; font-size: 0.77rem; font-weight: 500; }
 .bs-rm { background: #fee2e2; color: #dc2626; }
@@ -236,11 +238,11 @@ const CATS = [
 ];
 
 const DREAD = [
-  { id:'dmg', label:'Damage'    },
-  { id:'rep', label:'Repro.'    },
-  { id:'aff', label:'Affected'  },
-  { id:'exp', label:'Exploit.'  },
-  { id:'dis', label:'Discov.'   },
+  { id:'dmg', label:'Damage',   desc:'Hur allvarlig blir skadan om hotet realiseras?' },
+  { id:'rep', label:'Repro.',   desc:'Hur lätt går attacken att upprepa?' },
+  { id:'aff', label:'Affected', desc:'Hur stor andel användare påverkas?' },
+  { id:'exp', label:'Exploit.', desc:'Hur lätt är attacken att genomföra?' },
+  { id:'dis', label:'Discov.',  desc:'Hur lätt hittar en ANGRIPARE sårbarheten?' },
 ];
 
 // ── State ──────────────────────────────────────────────────────────────
@@ -312,6 +314,11 @@ function getBPos(bid) {
 function dreadSum(t) {
   if (!t?.dread) return 0;
   return DREAD.reduce((s, d) => s + (Number(t.dread[d.id]) || 0), 0);
+}
+
+function dreadComplete(t) {
+  if (!t?.dread) return false;
+  return DREAD.every(d => { const v = t.dread[d.id]; return Number.isInteger(v) && v >= 1 && v <= 10; });
 }
 
 function maxDread(cid) {
@@ -465,10 +472,11 @@ function edgePt(cx, cy, w, h, tx, ty) {
 function renderPanel() {
   const ap = document.getElementById('ap');
   if (!selected) {
+    const empty = state.components.length === 0;
     ap.innerHTML = `<div class="ap-empty">
       <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
-      <p style="color:#64748b;font-weight:500">Välj en komponent</p>
-      <p>Klicka på en nod i kartan</p>
+      <p style="color:#64748b;font-weight:500">${empty ? 'Börja här' : 'Välj en komponent'}</p>
+      <p>${empty ? 'Skapa din första komponent med + Komponent (och ev. + Gräns) i verktygsraden' : 'Klicka på en nod i kartan'}</p>
     </div>`;
     return;
   }
@@ -496,12 +504,13 @@ function renderPanel() {
     const t     = getT(comp.id, cat.id) || {};
     const dr    = t.dread || {};
     const score = dreadSum(t);
-    const isCrit = score > 0 && score >= state.threshold;
+    const complete = dreadComplete(t);
+    const isCrit = score >= state.threshold;
     const dinputs = DREAD.map(d => `<div class="di">
-      <label>${d.label}</label>
-      <input type="number" id="dr-${d.id}" min="1" max="10" value="${dr[d.id]||''}" placeholder="–" oninput="liveScore()">
+      <label title="${esc(d.desc)}">${d.label}</label>
+      <input type="number" id="dr-${d.id}" min="1" max="10" value="${dr[d.id]||''}" placeholder="–" title="${esc(d.desc)}" oninput="liveScore()">
     </div>`).join('');
-    const hasContent = t.description || t.controls || t.gaps || score > 0;
+    const exists = !!getT(comp.id, cat.id);
     form = `<div class="tf">
       <div class="tf-hd"><div class="ls" style="background:${cat.color}">${cat.id}</div>${cat.name} – ${esc(comp.name)}</div>
       <div class="fd"><label>Hur är attackvektorn möjlig?</label>
@@ -515,12 +524,13 @@ function renderPanel() {
       </div>
       <div class="drs">
         <div class="drl">DREAD-poäng
-          <span id="score-lbl" class="dsc${isCrit?' crit':score>0?' ok':''}">${score>0?score+'/50':''}</span>
+          <span id="score-lbl" class="dsc${isCrit?' crit':complete?' ok':''}">${score>0?score+'/50':''}</span>
         </div>
+        <div class="dr-scale">Varje dimension 1–10 (högre = allvarligare / bidrar mer till risken).</div>
         <div class="dri">${dinputs}</div>
       </div>
       <div class="fa">
-        ${hasContent ? `<button class="bs bs-rm" onclick="removeThreat('${esc(comp.id)}','${cat.id}')">Ta bort</button>` : ''}
+        ${exists ? `<button class="bs bs-rm" onclick="removeThreat('${esc(comp.id)}','${cat.id}')">Ta bort</button>` : ''}
         <button class="bs bs-cl" onclick="closeEdit()">Stäng</button>
         <button class="bs bs-sv" onclick="saveThreat('${esc(comp.id)}','${cat.id}')">Spara</button>
       </div>
@@ -532,14 +542,19 @@ function renderPanel() {
 }
 
 function liveScore() {
-  const score = DREAD.reduce((s, d) => {
-    const v = parseInt(document.getElementById('dr-'+d.id)?.value || '0');
-    return s + (v >= 1 && v <= 10 ? v : 0);
-  }, 0);
+  let score = 0, complete = true;
+  DREAD.forEach(d => {
+    const el = document.getElementById('dr-'+d.id);
+    const raw = (el?.value || '').trim();
+    const v = parseInt(raw || '0');
+    const valid = v >= 1 && v <= 10;
+    if (el) el.classList.toggle('invalid', raw !== '' && !valid);
+    if (valid) score += v; else complete = false;
+  });
   const lbl = document.getElementById('score-lbl');
   if (!lbl) return;
   lbl.textContent = score > 0 ? score + '/50' : '';
-  lbl.className = 'dsc' + (score >= state.threshold && score > 0 ? ' crit' : score > 0 ? ' ok' : '');
+  lbl.className = 'dsc' + (score >= state.threshold ? ' crit' : complete ? ' ok' : '');
 }
 
 // ── Interactions ───────────────────────────────────────────────────────
@@ -598,12 +613,14 @@ function saveThreat(compId, catId) {
     const v = parseInt(document.getElementById('dr-'+d.id)?.value || '0');
     if (v >= 1 && v <= 10) dread[d.id] = v;
   });
-  state.threats[tkey(compId, catId)] = {
-    description: document.getElementById('f-desc').value.trim(),
-    controls:    document.getElementById('f-ctrl').value.trim(),
-    gaps:        document.getElementById('f-gaps').value.trim(),
-    dread,
-  };
+  const description = document.getElementById('f-desc').value.trim();
+  const controls    = document.getElementById('f-ctrl').value.trim();
+  const gaps        = document.getElementById('f-gaps').value.trim();
+  if (!description && !controls && !gaps && !Object.keys(dread).length) {
+    delete state.threats[tkey(compId, catId)];
+  } else {
+    state.threats[tkey(compId, catId)] = { description, controls, gaps, dread };
+  }
   persist(); editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
@@ -733,6 +750,7 @@ function delComponent(id) {
 }
 
 function delFlow(id) {
+  if (!confirm('Ta bort flödet?')) return;
   state.flows = state.flows.filter(f => f.id !== id);
   persist(); renderCanvas(); renderSidebar();
 }
@@ -864,6 +882,7 @@ th{text-align:left;padding:8px 13px;font-size:.63rem;text-transform:uppercase;le
 td{padding:9px 13px;border-bottom:1px solid #f1f5f9;vertical-align:top;line-height:1.45}
 tr:last-child td{border-bottom:none}
 .et{padding:13px 16px;color:#94a3b8;font-size:.85rem;margin:0}
+.dread-legend{font-size:.73rem;color:#64748b;margin:-14px 0 30px;line-height:1.5}
 @media print{body{padding:20px}}
 </style></head><body>
 <h1>${esc(sessionName)}</h1>
@@ -878,6 +897,7 @@ tr:last-child td{border-bottom:none}
   </div>
   <div class="stat"><div class="stat-n">${state.boundaries.length}</div><div class="stat-l">Trust boundaries</div></div>
 </div>
+<p class="dread-legend">DREAD-kolumner: <strong>D</strong> Damage · <strong>R</strong> Reproducibility · <strong>A</strong> Affected · <strong>E</strong> Exploitability · <strong>Disc</strong> Discoverability. Varje 1–10 (högre = allvarligare / bidrar mer till risken).</p>
 ${flowSection}${sections}
 </body></html>`;
 

@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, tkey, dreadSum, fresh, maxDread, sane, uid, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, tkey, dreadSum, dreadComplete, fresh, maxDread, sane, uid, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -85,6 +85,24 @@ test('fresh returnerar forvantad form', () => {
   ]);
   // ny referens varje anrop
   assert.ok(M.fresh() !== f);
+});
+
+test('dreadComplete: alla fem falt 1-10 ger true', () => {
+  assert.equal(M.dreadComplete({ dread: { dmg:5, rep:5, aff:5, exp:5, dis:5 } }), true);
+  assert.equal(M.dreadComplete({ dread: { dmg:1, rep:10, aff:3, exp:7, dis:2 } }), true);
+});
+
+test('dreadComplete: ofullstandig eller ogiltig ger false', () => {
+  assert.equal(M.dreadComplete({ dread: { dmg:9 } }), false);              // bara ett falt
+  assert.equal(M.dreadComplete({ dread: { dmg:5, rep:5, aff:5, exp:5, dis:11 } }), false); // utanfor 1-10
+  assert.equal(M.dreadComplete({ dread: { dmg:5, rep:5, aff:5, exp:5, dis:0 } }), false);  // 0
+});
+
+test('dreadComplete: tom/saknad ger false', () => {
+  assert.equal(M.dreadComplete(undefined), false);
+  assert.equal(M.dreadComplete(null), false);
+  assert.equal(M.dreadComplete({}), false);
+  assert.equal(M.dreadComplete({ dread: {} }), false);
 });
 
 test('maxDread ger hogsta DREAD-summan bland kategorier', () => {
