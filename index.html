@@ -261,10 +261,24 @@ function sane(s) {
   if ((s.flows || []).some(f => !id(f?.id) || !id(f?.from) || !id(f?.to))) return false;
   if (Object.entries(s.pos || {}).some(([k, p]) => !id(k) || !obj(p) || !num(p.x) || !num(p.y))) return false;
   if (Object.entries(s.bpos || {}).some(([k, p]) => !id(k) || !obj(p) || !num(p.x) || !num(p.y) || !num(p.w) || !num(p.h))) return false;
-  if (Object.entries(s.threats || {}).some(([k, t]) => !/^[a-z0-9]{1,9}_[STRIDE]$/.test(k) || !obj(t) ||
+  if (Object.entries(s.threats || {}).some(([k, t]) => !/^[cf]:[a-z0-9]{1,9}_[STRIDE]$/.test(k) || !obj(t) ||
       (t.dread != null && (!obj(t.dread) || Object.values(t.dread).some(v => !Number.isInteger(v) || v < 1 || v > 10))))) return false;
   if (s.threshold != null && !(num(s.threshold) && s.threshold >= 5 && s.threshold <= 50)) return false;
   return true;
+}
+
+// Normaliserar gamla otypade threat-nycklar (abc_S) till komponenthot (c:abc_S).
+// Typade nycklar (c:/f:) lämnas orörda. Idempotent.
+function migrate(s) {
+  if (s && s.threats && typeof s.threats === 'object' && !Array.isArray(s.threats)) {
+    for (const k of Object.keys(s.threats)) {
+      if (!k.includes(':') && /^[a-z0-9]{1,9}_[STRIDE]$/.test(k)) {
+        if (!(('c:' + k) in s.threats)) s.threats['c:' + k] = s.threats[k];
+        delete s.threats[k];
+      }
+    }
+  }
+  return s;
 }
 
 let state = (() => {
@@ -272,6 +286,7 @@ let state = (() => {
     const raw = localStorage.getItem('stride');
     const s = JSON.parse(raw || 'null');
     if (!s) return fresh();
+    migrate(s);
     if (!sane(s)) {
       localStorage.setItem('stride_bak', raw);
       alert('Sparad analys kunde inte läsas in och har lagts åt sidan. Den finns kvar under nyckeln "stride_bak" i localStorage.');
@@ -291,9 +306,9 @@ let flowFrom = null;
 // ── Helpers ────────────────────────────────────────────────────────────
 const uid  = () => Math.random().toString(36).slice(2, 9);
 const esc  = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-const tkey = (cid, cat) => `${cid}_${cat}`;
-const getT = (cid, cat) => state.threats[tkey(cid, cat)];
-const cnt  = cid => CATS.filter(c => getT(cid, c.id)).length;
+const skey = (kind, id, cat) => `${kind}:${id}_${cat}`;
+const getT = (kind, id, cat) => state.threats[skey(kind, id, cat)];
+const cnt  = (kind, id) => CATS.filter(c => getT(kind, id, c.id)).length;
 
 function getPos(id) {
   if (!state.pos[id]) {
@@ -321,8 +336,8 @@ function dreadComplete(t) {
   return DREAD.every(d => { const v = t.dread[d.id]; return Number.isInteger(v) && v >= 1 && v <= 10; });
 }
 
-function maxDread(cid) {
-  const scores = CATS.map(c => dreadSum(getT(cid, c.id))).filter(s => s > 0);
+function maxDread(kind, id) {
+  const scores = CATS.map(c => dreadSum(getT(kind, id, c.id))).filter(s => s > 0);
   return scores.length ? Math.max(...scores) : 0;
 }
 
@@ -338,8 +353,8 @@ function renderSidebar() {
     html += '<div class="bg">';
     if (b) html += `<div class="bl">${esc(b.name)}<button class="x" onclick="delBoundary('${esc(bid)}')">✕</button></div>`;
     for (const c of comps) {
-      const n = cnt(c.id);
-      const ms = maxDread(c.id);
+      const n = cnt('c', c.id);
+      const ms = maxDread('c', c.id);
       const crit = ms > 0 && ms >= state.threshold;
       html += `<div class="ci${selected===c.id?' sel':''}" onclick="selectComp('${esc(c.id)}')">
         <span class="nm">${esc(c.name)}</span>
@@ -399,7 +414,7 @@ function renderCanvas() {
   // Component nodes
   for (const c of state.components) {
     const p = getPos(c.id);
-    const ms = maxDread(c.id);
+    const ms = maxDread('c', c.id);
     const isCrit = ms > 0 && ms >= state.threshold;
     const isSel  = selected === c.id;
     const isSrc  = flowFrom === c.id;
@@ -414,7 +429,7 @@ function renderCanvas() {
     el.style.top  = p.y + 'px';
 
     const dots = CATS.map(cat => {
-      const t = getT(c.id, cat.id);
+      const t = getT('c', c.id, cat.id);
       return `<div class="dot" style="background:${t ? cat.color : '#e2e8f0'}" title="${cat.name}"></div>`;
     }).join('');
 
@@ -486,7 +501,7 @@ function renderPanel() {
 
   let grid = '<div class="sg">';
   for (const cat of CATS) {
-    const t = getT(comp.id, cat.id);
+    const t = getT('c', comp.id, cat.id);
     const isOpen = editing && editing.compId === comp.id && editing.catId === cat.id;
     grid += `<div class="sc${t?' has':''}${isOpen?' open':''}" style="--c:${cat.color}" onclick="toggleEdit('${esc(comp.id)}','${cat.id}')">
       <div class="sc-l">${cat.id}</div>
@@ -501,7 +516,7 @@ function renderPanel() {
   let form = '';
   if (editing && editing.compId === comp.id) {
     const cat   = CATS.find(c => c.id === editing.catId);
-    const t     = getT(comp.id, cat.id) || {};
+    const t     = getT('c', comp.id, cat.id) || {};
     const dr    = t.dread || {};
     const score = dreadSum(t);
     const complete = dreadComplete(t);
@@ -510,7 +525,7 @@ function renderPanel() {
       <label title="${esc(d.desc)}">${d.label}</label>
       <input type="number" id="dr-${d.id}" min="1" max="10" value="${dr[d.id]||''}" placeholder="–" title="${esc(d.desc)}" oninput="liveScore()">
     </div>`).join('');
-    const exists = !!getT(comp.id, cat.id);
+    const exists = !!getT('c', comp.id, cat.id);
     form = `<div class="tf">
       <div class="tf-hd"><div class="ls" style="background:${cat.color}">${cat.id}</div>${cat.name} – ${esc(comp.name)}</div>
       <div class="fd"><label>Hur är attackvektorn möjlig?</label>
@@ -560,7 +575,7 @@ function liveScore() {
 // ── Interactions ───────────────────────────────────────────────────────
 function dirty() {
   if (!editing) return false;
-  const t = state.threats[tkey(editing.compId, editing.catId)] || {};
+  const t = state.threats[skey('c', editing.compId, editing.catId)] || {};
   const cur = id => (document.getElementById(id)?.value || '').trim();
   if (cur('f-desc') !== (t.description || '')) return true;
   if (cur('f-ctrl') !== (t.controls || '')) return true;
@@ -617,16 +632,16 @@ function saveThreat(compId, catId) {
   const controls    = document.getElementById('f-ctrl').value.trim();
   const gaps        = document.getElementById('f-gaps').value.trim();
   if (!description && !controls && !gaps && !Object.keys(dread).length) {
-    delete state.threats[tkey(compId, catId)];
+    delete state.threats[skey('c', compId, catId)];
   } else {
-    state.threats[tkey(compId, catId)] = { description, controls, gaps, dread };
+    state.threats[skey('c', compId, catId)] = { description, controls, gaps, dread };
   }
   persist(); editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
 function removeThreat(compId, catId) {
-  delete state.threats[tkey(compId, catId)];
+  delete state.threats[skey('c', compId, catId)];
   persist(); editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
@@ -741,8 +756,10 @@ function addComponent() {
 
 function delComponent(id) {
   if (!confirm('Ta bort komponenten och alla registrerade hot?')) return;
+  const gone = state.flows.filter(f => f.from === id || f.to === id);
   state.components = state.components.filter(c => c.id !== id);
-  CATS.forEach(cat => delete state.threats[tkey(id, cat.id)]);
+  CATS.forEach(cat => delete state.threats[skey('c', id, cat.id)]);
+  gone.forEach(f => CATS.forEach(cat => delete state.threats[skey('f', f.id, cat.id)]));
   state.flows = state.flows.filter(f => f.from !== id && f.to !== id);
   delete state.pos[id];
   if (selected === id) { selected = null; editing = null; }
@@ -752,6 +769,7 @@ function delComponent(id) {
 function delFlow(id) {
   if (!confirm('Ta bort flödet?')) return;
   state.flows = state.flows.filter(f => f.id !== id);
+  CATS.forEach(cat => delete state.threats[skey('f', id, cat.id)]);
   persist(); renderCanvas(); renderSidebar();
 }
 
@@ -781,7 +799,7 @@ document.getElementById('threshold').addEventListener('change', e => {
 
 // ── Spara / Öppna ──────────────────────────────────────────────────────
 function saveModel() {
-  const data = JSON.stringify({ app:'stride-tool', version:1, state }, null, 2);
+  const data = JSON.stringify({ app:'stride-tool', version:2, state }, null, 2);
   const safe = (state.name || 'stride').replace(/[^a-z0-9åäö_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'stride';
   const fname = `${safe}-${new Date().toLocaleDateString('sv-SE')}.json`;
   const url = URL.createObjectURL(new Blob([data], { type:'application/json' }));
@@ -804,6 +822,7 @@ function openModel() {
       if (!obj || obj.app !== 'stride-tool' || typeof obj.state !== 'object' || !obj.state) {
         alert('Fel filtyp – detta är inte en STRIDE-analysfil.'); return;
       }
+      migrate(obj.state);
       if (!sane(obj.state)) { alert('Filen innehåller ogiltiga data och kan inte läsas in. Om filen redigerats för hand: id-fält måste behålla sitt ursprungliga format (a–z, 0–9, max 9 tecken).'); return; }
       const hasData = state.components.length || state.boundaries.length || state.flows.length || Object.keys(state.threats).length;
       if (hasData && !confirm('Detta ersätter din nuvarande analys och kan inte ångras. Spara den först om du vill behålla den. Fortsätta?')) return;
@@ -841,10 +860,10 @@ function exportReport() {
   let sections = '';
   for (const comp of state.components) {
     const boundary = comp.bid ? state.boundaries.find(b => b.id === comp.bid) : null;
-    const threats  = CATS.filter(cat => getT(comp.id, cat.id));
+    const threats  = CATS.filter(cat => getT('c', comp.id, cat.id));
     let rows = '';
     for (const cat of threats) {
-      const t = getT(comp.id, cat.id);
+      const t = getT('c', comp.id, cat.id);
       const score = dreadSum(t);
       const crit  = score > 0 && score >= state.threshold;
       totalThreats++; if (crit) critThreats++;

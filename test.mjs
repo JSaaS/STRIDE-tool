@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, tkey, dreadSum, dreadComplete, fresh, maxDread, sane, uid, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, cnt, sane, uid, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -52,9 +52,33 @@ test('esc lamnar vanlig text orord', () => {
   assert.equal(M.esc('hello world 123'), 'hello world 123');
 });
 
-test('tkey bygger nyckel cid_cat', () => {
-  assert.equal(M.tkey('abc', 'S'), 'abc_S');
-  assert.equal(M.tkey('x1', 'E'), 'x1_E');
+test('skey bygger typad nyckel kind:id_cat', () => {
+  assert.equal(M.skey('c', 'abc', 'S'), 'c:abc_S');
+  assert.equal(M.skey('f', 'def', 'T'), 'f:def_T');
+});
+
+test('migrate typar om gamla otypade nycklar till komponenthot', () => {
+  const s = { threats: { 'abc123_S': { x:1 } } };
+  M.migrate(s);
+  assert.deepEqual(s.threats, { 'c:abc123_S': { x:1 } });
+});
+
+test('migrate lamnar redan typade nycklar ororda', () => {
+  const s = { threats: { 'c:abc_S': { a:1 }, 'f:def_T': { b:2 } } };
+  M.migrate(s);
+  assert.deepEqual(s.threats, { 'c:abc_S': { a:1 }, 'f:def_T': { b:2 } });
+});
+
+test('migrate ar idempotent', () => {
+  const s = { threats: { 'abc123_S': { x:1 } } };
+  M.migrate(s); M.migrate(s);
+  assert.deepEqual(s.threats, { 'c:abc123_S': { x:1 } });
+});
+
+test('migrate: vid kollision bevaras den typade, otypad kastas', () => {
+  const s = { threats: { 'abc_S': { description:'bare' }, 'c:abc_S': { description:'typed' } } };
+  M.migrate(s);
+  assert.deepEqual(s.threats, { 'c:abc_S': { description:'typed' } });
 });
 
 test('dreadSum summerar de fem falten', () => {
@@ -109,16 +133,27 @@ test('maxDread ger hogsta DREAD-summan bland kategorier', () => {
   M.state = {
     ...M.fresh(),
     threats: {
-      [M.tkey('c1','S')]: { dread: { dmg:1, rep:1, aff:1, exp:1, dis:1 } }, // 5
-      [M.tkey('c1','E')]: { dread: { dmg:5, rep:5, aff:5, exp:5, dis:5 } }, // 25
+      [M.skey('c','c1','S')]: { dread: { dmg:1, rep:1, aff:1, exp:1, dis:1 } }, // 5
+      [M.skey('c','c1','E')]: { dread: { dmg:5, rep:5, aff:5, exp:5, dis:5 } }, // 25
     },
   };
-  assert.equal(M.maxDread('c1'), 25);
+  assert.equal(M.maxDread('c', 'c1'), 25);
 });
 
 test('maxDread ger 0 nar komponenten saknar hot', () => {
   M.state = M.fresh();
-  assert.equal(M.maxDread('nope'), 0);
+  assert.equal(M.maxDread('c', 'nope'), 0);
+});
+
+test('getT/cnt/maxDread fungerar med kind-argument', () => {
+  M.state = {
+    ...M.fresh(),
+    threats: { 'c:abc_S': { dread: { dmg:2, rep:2, aff:2, exp:2, dis:2 } } }, // 10
+  };
+  assert.ok(M.getT('c', 'abc', 'S'));
+  assert.equal(M.getT('c', 'abc', 'T'), undefined);
+  assert.equal(M.cnt('c', 'abc'), 1);
+  assert.equal(M.maxDread('c', 'abc'), 10);
 });
 
 test('sane godkanner fresh-state', () => {
@@ -140,7 +175,7 @@ test('sane godkanner giltig state med data', () => {
     boundaries:[{ id:'b1a2c', name:'DMZ' }],
     components:[{ id:'c0mp1', name:'API', bid:'b1a2c' }, { id:'c0mp2', name:'DB', bid:null }],
     flows:[{ id:'f1x', from:'c0mp1', to:'c0mp2', label:'SQL' }],
-    threats:{ 'c0mp1_S': { description:'spoofing', dread:{ dmg:1, rep:5, aff:10, exp:7, dis:3 } } },
+    threats:{ 'c:c0mp1_S': { description:'spoofing', dread:{ dmg:1, rep:5, aff:10, exp:7, dis:3 } } },
     pos:{ c0mp1:{ x:1, y:2 } }, bpos:{ b1a2c:{ x:0, y:0, w:1, h:1 } },
     threshold:25,
   }), true);
@@ -154,9 +189,17 @@ test('sane avvisar id med apostrof', () => {
   assert.equal(M.sane({ ...M.fresh(), components:[{ id:"a'b", name:'x' }] }), false);
 });
 
+test('sane godkanner typade threat-nycklar', () => {
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'c:abc_S': {} } }), true);
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'f:def_T': {} } }), true);
+});
+
 test('sane avvisar threats-nyckel med fel format', () => {
-  assert.equal(M.sane({ ...M.fresh(), threats:{ 'abc_X': {} } }), false);
-  assert.equal(M.sane({ ...M.fresh(), threats:{ 'a"b_S': {} } }), false);
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'abc_S': {} } }), false);   // otypad (post-v2)
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'x:abc_S': {} } }), false);  // fel prefix
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'c:abc_X': {} } }), false);  // fel kategori
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'c:ABBB_S': {} } }), false); // ogiltigt id
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'c:a"b_S': {} } }), false);
 });
 
 test('sane avvisar fel typ pa faltet', () => {
@@ -173,12 +216,12 @@ test('sane avvisar daliga id-varianter', () => {
 });
 
 test('sane avvisar ogiltiga dread-varden', () => {
-  const t = d => ({ ...M.fresh(), threats:{ abc_S:{ dread:d } } });
+  const t = d => ({ ...M.fresh(), threats:{ 'c:abc_S':{ dread:d } } });
   assert.equal(M.sane(t({ dmg:'" onfocus=alert(1) autofocus x="' })), false);
   assert.equal(M.sane(t({ dmg:0 })), false);
   assert.equal(M.sane(t({ dmg:11 })), false);
-  assert.equal(M.sane({ ...M.fresh(), threats:{ abc_S:null } }), false);
-  assert.equal(M.sane({ ...M.fresh(), threats:{ abc_S:[] } }), false);
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'c:abc_S':null } }), false);
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'c:abc_S':[] } }), false);
 });
 
 test('sane avvisar ogiltig threshold', () => {
