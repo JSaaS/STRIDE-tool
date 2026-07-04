@@ -909,26 +909,14 @@ function exportReport() {
   const date = new Date().toLocaleDateString('sv-SE', {year:'numeric', month:'long', day:'numeric'});
   let totalThreats = 0, critThreats = 0;
 
-  let flowSection = '';
-  if (state.flows.length > 0) {
-    const frows = state.flows.map(f => {
-      const from = state.components.find(c => c.id === f.from);
-      const to   = state.components.find(c => c.id === f.to);
-      if (!from || !to) return '';
-      return `<tr><td>${esc(from.name)}</td><td style="color:#94a3b8">→</td><td>${esc(to.name)}</td><td>${esc(f.label||'–')}</td></tr>`;
-    }).join('');
-    flowSection = `<section><div class="ch"><h2>Informationsflöden</h2></div>
-      <table><thead><tr><th>Från</th><th></th><th>Till</th><th>Beskrivning</th></tr></thead><tbody>${frows}</tbody></table>
-    </section>`;
-  }
-
-  let sections = '';
-  for (const comp of state.components) {
-    const boundary = comp.bid ? state.boundaries.find(b => b.id === comp.bid) : null;
-    const threats  = CATS.filter(cat => getT('c', comp.id, cat.id));
+  // Bygg hotrader + hottabell för ett subjekt (komponent eller flöde).
+  // Räknar in dokumenterade hot och kritiska i totalThreats/critThreats.
+  const thead = `<thead><tr><th>Kategori</th><th>Hur möjlig</th><th>Befintliga skydd</th><th>Luckor</th><th title="Damage">D</th><th title="Reproducibility">R</th><th title="Affected users">A</th><th title="Exploitability">E</th><th title="Discoverability">Disc</th><th>Summa</th></tr></thead>`;
+  const buildTable = (kind, id) => {
+    const cats = CATS.filter(cat => getT(kind, id, cat.id));
     let rows = '';
-    for (const cat of threats) {
-      const t = getT('c', comp.id, cat.id);
+    for (const cat of cats) {
+      const t = getT(kind, id, cat.id);
       const score = dreadSum(t);
       const crit  = score > 0 && score >= state.threshold;
       totalThreats++; if (crit) critThreats++;
@@ -940,13 +928,47 @@ function exportReport() {
         <td style="text-align:center;font-weight:700;color:${crit?'#dc2626':score>0?'#059669':'#94a3b8'}">${score||'–'}</td>
       </tr>`;
     }
+    return { n: cats.length, table: cats.length===0 ? '<p class="et">Inga hot identifierade.</p>' :
+      `<table>${thead}<tbody>${rows}</tbody></table>` };
+  };
+
+  let flowSection = '';
+  if (state.flows.length > 0) {
+    const frows = state.flows.map(f => {
+      const from = state.components.find(c => c.id === f.from);
+      const to   = state.components.find(c => c.id === f.to);
+      if (!from || !to) return '';
+      const md = maxDread('f', f.id);
+      return `<tr><td>${esc(from.name)}</td><td style="color:#94a3b8">→</td><td>${esc(to.name)}</td><td>${esc(f.label||'–')}</td><td>${crosses(f)?'Ja':'Nej'}</td><td style="text-align:center">${cnt('f',f.id)}</td><td style="text-align:center">${md||'–'}</td></tr>`;
+    }).join('');
+    flowSection = `<section><div class="ch"><h2>Informationsflöden</h2></div>
+      <table><thead><tr><th>Från</th><th></th><th>Till</th><th>Beskrivning</th><th>Korsar trust boundary</th><th>Antal hot</th><th>Högsta DREAD</th></tr></thead><tbody>${frows}</tbody></table>
+    </section>`;
+  }
+
+  let sections = '';
+  for (const comp of state.components) {
+    const boundary = comp.bid ? state.boundaries.find(b => b.id === comp.bid) : null;
+    const { n, table } = buildTable('c', comp.id);
     sections += `<section><div class="ch">
         <h2>${esc(comp.name)}</h2>
         ${boundary?`<span class="tg">${esc(boundary.name)}</span>`:''}
-        <span class="tg" style="background:#f1f5f9;color:#64748b">${threats.length} hot</span>
+        <span class="tg" style="background:#f1f5f9;color:#64748b">${n} hot</span>
       </div>
-      ${threats.length===0 ? '<p class="et">Inga hot identifierade.</p>' :
-        `<table><thead><tr><th>Kategori</th><th>Hur möjlig</th><th>Befintliga skydd</th><th>Luckor</th><th title="Damage">D</th><th title="Reproducibility">R</th><th title="Affected users">A</th><th title="Exploitability">E</th><th title="Discoverability">Disc</th><th>Summa</th></tr></thead><tbody>${rows}</tbody></table>`}
+      ${table}
+    </section>`;
+  }
+
+  let flowThreatSections = '';
+  for (const f of state.flows) {
+    if (cnt('f', f.id) === 0) continue;
+    const { table } = buildTable('f', f.id);
+    flowThreatSections += `<section><div class="ch">
+        <h2>Flöde: ${esc(flowName(f))}</h2>
+        ${crosses(f)?'<span class="tg" style="background:#fff7ed;color:#c2410c">Korsar trust boundary</span>':''}
+        <span class="tg" style="background:#f1f5f9;color:#64748b">${cnt('f',f.id)} hot</span>
+      </div>
+      ${table}
     </section>`;
   }
 
@@ -982,7 +1004,11 @@ tr:last-child td{border-bottom:none}
   <div class="stat"><div class="stat-n">${state.boundaries.length}</div><div class="stat-l">Trust boundaries</div></div>
 </div>
 <p class="dread-legend">DREAD-kolumner: <strong>D</strong> Damage · <strong>R</strong> Reproducibility · <strong>A</strong> Affected · <strong>E</strong> Exploitability · <strong>Disc</strong> Discoverability. Varje 1–10 (högre = allvarligare / bidrar mer till risken).</p>
-${flowSection}${sections}
+${flowSection}
+<h2 style="font-size:1.15rem;font-weight:800;margin:34px 0 16px">Komponenthot</h2>
+${sections || '<p class="et" style="padding:0">Inga komponenter.</p>'}
+<h2 style="font-size:1.15rem;font-weight:800;margin:34px 0 16px">Flödeshot</h2>
+${flowThreatSections || '<p class="et" style="padding:0">Inga dokumenterade flödeshot.</p>'}
 </body></html>`;
 
   const win = window.open('', '_blank');
