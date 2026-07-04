@@ -469,6 +469,7 @@ function renderCanvas() {
     let wasDragged = false;
     el.addEventListener('mousedown', e => {
       if (e.button !== 0) return;
+      if (flowMode) return;
       wasDragged = false;
       startDrag(e, 'comp', c.id);
     });
