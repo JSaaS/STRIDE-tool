@@ -44,8 +44,13 @@ aside { width: 214px; background: white; border-right: 1px solid #e2e8f0; displa
 .ci .bd { font-size: 0.6rem; padding: 1px 5px; border-radius: 7px; flex-shrink: 0; background: #e2e8f0; color: #64748b; }
 .ci .x { opacity: 0; background: none; border: none; cursor: pointer; color: #cbd5e1; font-size: 0.68rem; padding: 1px 2px; flex-shrink: 0; }
 .ci:hover .x { opacity: 1; }
-.fi { padding: 5px 10px; display: flex; align-items: center; gap: 5px; border-radius: 5px; margin: 1px 4px; }
+.fi { padding: 5px 10px; display: flex; align-items: center; gap: 5px; border-radius: 5px; margin: 1px 4px; cursor: pointer; }
+.fi:hover { background: #f8fafc; }
+.fi.sel { background: #eff6ff; }
 .fi .fl { font-size: 0.76rem; flex: 1; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fi.sel .fl { color: #1d4ed8; font-weight: 500; }
+.fi .tb { font-size: 0.55rem; font-weight: 700; letter-spacing: 0.03em; padding: 1px 4px; border-radius: 5px; flex-shrink: 0; background: #ffedd5; color: #c2410c; }
+.fi .bd { font-size: 0.6rem; padding: 1px 5px; border-radius: 7px; flex-shrink: 0; background: #e2e8f0; color: #64748b; }
 .fi .x { opacity: 0; background: none; border: none; cursor: pointer; color: #cbd5e1; font-size: 0.68rem; padding: 1px 2px; flex-shrink: 0; }
 .fi:hover .x { opacity: 1; }
 
@@ -88,6 +93,7 @@ aside { width: 214px; background: white; border-right: 1px solid #e2e8f0; displa
 .ap-hd { padding: 13px 14px; border-bottom: 1px solid #f1f5f9; flex-shrink: 0; }
 .ap-hd h3 { font-size: 0.98rem; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .b-tag { font-size: 0.67rem; background: #f1f5f9; color: #64748b; padding: 2px 7px; border-radius: 7px; font-weight: 500; }
+.ap-note { font-size: 0.7rem; color: #94a3b8; line-height: 1.45; margin-top: 7px; }
 
 /* STRIDE grid */
 .sg { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; padding: 11px; }
@@ -194,8 +200,8 @@ aside { width: 214px; background: white; border-right: 1px solid #e2e8f0; displa
   <div class="ap" id="ap">
     <div class="ap-empty">
       <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
-      <p style="color:#64748b;font-weight:500">Välj en komponent</p>
-      <p>Klicka på en nod i kartan</p>
+      <p style="color:#64748b;font-weight:500">Välj en komponent eller ett flöde</p>
+      <p>Klicka på en nod eller en flödespil i kartan</p>
     </div>
   </div>
 </div>
@@ -298,8 +304,8 @@ let state = (() => {
 
 function persist() { localStorage.setItem('stride', JSON.stringify(state)); }
 
-let selected = null;
-let editing  = null;  // { compId, catId }
+let selected = null;  // { kind:'c'|'f', id }
+let editing  = null;  // { kind, id, catId }
 let flowMode = false;
 let flowFrom = null;
 
@@ -341,6 +347,22 @@ function maxDread(kind, id) {
   return scores.length ? Math.max(...scores) : 0;
 }
 
+// Korsar flödet en trust boundary? Beräknas dynamiskt, sparas aldrig.
+function crosses(f) {
+  const from = state.components.find(c => c.id === f.from);
+  const to   = state.components.find(c => c.id === f.to);
+  if (!from || !to) return false;
+  return (from.bid || null) !== (to.bid || null);
+}
+
+// Subjektnamn för panel/rubrik.
+function flowName(f) {
+  const from = state.components.find(c => c.id === f.from);
+  const to   = state.components.find(c => c.id === f.to);
+  if (!from || !to) return '';
+  return `${from.name} → ${to.name}${f.label ? ` (${f.label})` : ''}`;
+}
+
 // ── Sidebar ────────────────────────────────────────────────────────────
 function renderSidebar() {
   const grouped = {};
@@ -356,7 +378,7 @@ function renderSidebar() {
       const n = cnt('c', c.id);
       const ms = maxDread('c', c.id);
       const crit = ms > 0 && ms >= state.threshold;
-      html += `<div class="ci${selected===c.id?' sel':''}" onclick="selectComp('${esc(c.id)}')">
+      html += `<div class="ci${selected?.kind==='c'&&selected.id===c.id?' sel':''}" onclick="selectComp('${esc(c.id)}')">
         <span class="nm">${esc(c.name)}</span>
         ${n > 0 ? `<span class="bd" style="${crit?'background:#fee2e2;color:#dc2626':''}">${n}</span>` : ''}
         <button class="x" onclick="event.stopPropagation();delComponent('${esc(c.id)}')">✕</button>
@@ -372,9 +394,14 @@ function renderSidebar() {
     const to   = state.components.find(c => c.id === f.to);
     if (!from || !to) continue;
     const lbl = f.label ? ` (${esc(f.label)})` : '';
-    fhtml += `<div class="fi">
+    const n = cnt('f', f.id);
+    const ms = maxDread('f', f.id);
+    const crit = ms > 0 && ms >= state.threshold;
+    fhtml += `<div class="fi${selected?.kind==='f'&&selected.id===f.id?' sel':''}" onclick="selectFlow('${esc(f.id)}')">
       <span class="fl">${esc(from.name)} → ${esc(to.name)}${lbl}</span>
-      <button class="x" onclick="delFlow('${esc(f.id)}')">✕</button>
+      ${crosses(f) ? '<span class="tb" title="Korsar trust boundary">TB</span>' : ''}
+      ${n > 0 ? `<span class="bd" style="${crit?'background:#fee2e2;color:#dc2626':''}">${n}</span>` : ''}
+      <button class="x" onclick="event.stopPropagation();delFlow('${esc(f.id)}')">✕</button>
     </div>`;
   }
   document.getElementById('f-list').innerHTML = fhtml;
@@ -416,7 +443,7 @@ function renderCanvas() {
     const p = getPos(c.id);
     const ms = maxDread('c', c.id);
     const isCrit = ms > 0 && ms >= state.threshold;
-    const isSel  = selected === c.id;
+    const isSel  = selected?.kind === 'c' && selected.id === c.id;
     const isSrc  = flowFrom === c.id;
 
     const el = document.createElement('div');
@@ -455,10 +482,18 @@ function renderCanvas() {
   renderFlows(svg);
 }
 
+const FCLR = { sel:'#2563eb', crit:'#dc2626', cross:'#f97316', norm:'#94a3b8' };
+
+function flowColorKey(f) {
+  if (selected?.kind === 'f' && selected.id === f.id) return 'sel';
+  if (maxDread('f', f.id) >= state.threshold) return 'crit';
+  if (crosses(f)) return 'cross';
+  return 'norm';
+}
+
 function renderFlows(svg) {
-  const defs = `<defs><marker id="arr" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto">
-    <polygon points="0 0,9 3,0 6" fill="#94a3b8"/>
-  </marker></defs>`;
+  const defs = `<defs>${Object.entries(FCLR).map(([k,c]) =>
+    `<marker id="arr-${k}" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,9 3,0 6" fill="${c}"/></marker>`).join('')}</defs>`;
   let paths = '';
   for (const f of state.flows) {
     const fp = state.pos[f.from], tp = state.pos[f.to];
@@ -468,8 +503,17 @@ function renderFlows(svg) {
     const s = edgePt(fcx, fcy, NW, NH, tcx, tcy);
     const e = edgePt(tcx, tcy, NW, NH, fcx, fcy);
     const mx = (s.x+e.x)/2, my = (s.y+e.y)/2 - 7;
-    paths += `<line x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${e.x.toFixed(1)}" y2="${e.y.toFixed(1)}" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr)"/>`;
-    if (f.label) paths += `<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" text-anchor="middle" font-size="11" fill="#64748b" font-family="system-ui,sans-serif">${esc(f.label)}</text>`;
+    const key = flowColorKey(f);
+    const clr = FCLR[key];
+    const oc  = `onclick="selectFlow('${esc(f.id)}')"`;
+    paths += `<line x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${e.x.toFixed(1)}" y2="${e.y.toFixed(1)}" stroke="transparent" stroke-width="14" pointer-events="stroke" style="cursor:pointer" ${oc}/>`;
+    paths += `<line x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${e.x.toFixed(1)}" y2="${e.y.toFixed(1)}" stroke="${clr}" stroke-width="1.5" marker-end="url(#arr-${key})"/>`;
+    if (f.label) paths += `<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" text-anchor="middle" font-size="11" fill="#64748b" font-family="system-ui,sans-serif" style="cursor:pointer" pointer-events="all" ${oc}>${esc(f.label)}</text>`;
+    const ms = maxDread('f', f.id);
+    if (cnt('f', f.id) > 0) {
+      const wy = my + (f.label ? 13 : 0);
+      paths += `<text x="${mx.toFixed(1)}" y="${wy.toFixed(1)}" text-anchor="middle" font-size="10" fill="${ms>=state.threshold?'#dc2626':'#94a3b8'}" font-family="system-ui,sans-serif" style="cursor:pointer" pointer-events="all" ${oc}>⚠ ${ms}/50</text>`;
+    }
   }
   svg.innerHTML = defs + paths;
 }
@@ -490,20 +534,32 @@ function renderPanel() {
     const empty = state.components.length === 0;
     ap.innerHTML = `<div class="ap-empty">
       <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
-      <p style="color:#64748b;font-weight:500">${empty ? 'Börja här' : 'Välj en komponent'}</p>
-      <p>${empty ? 'Skapa din första komponent med + Komponent (och ev. + Gräns) i verktygsraden' : 'Klicka på en nod i kartan'}</p>
+      <p style="color:#64748b;font-weight:500">${empty ? 'Börja här' : 'Välj en komponent eller ett flöde'}</p>
+      <p>${empty ? 'Skapa din första komponent med + Komponent (och ev. + Gräns) i verktygsraden' : 'Klicka på en nod eller en flödespil i kartan'}</p>
     </div>`;
     return;
   }
-  const comp = state.components.find(c => c.id === selected);
-  if (!comp) { selected = null; renderPanel(); return; }
-  const boundary = comp.bid ? state.boundaries.find(b => b.id === comp.bid) : null;
+  const { kind, id } = selected;
+  let title;
+  if (kind === 'c') {
+    const comp = state.components.find(c => c.id === id);
+    if (!comp) { selected = null; editing = null; renderPanel(); return; }
+    const boundary = comp.bid ? state.boundaries.find(b => b.id === comp.bid) : null;
+    title = esc(comp.name) + (boundary ? `<span class="b-tag">${esc(boundary.name)}</span>` : '');
+  } else {
+    const f = state.flows.find(x => x.id === id);
+    const from = f && state.components.find(c => c.id === f.from);
+    const to   = f && state.components.find(c => c.id === f.to);
+    if (!f || !from || !to) { selected = null; editing = null; renderPanel(); return; }
+    title = `Flöde: ${esc(flowName(f))}` + (crosses(f) ? '<span class="b-tag">Korsar trust boundary</span>' : '');
+  }
+  const subjName = kind === 'c' ? state.components.find(c => c.id === id).name : flowName(state.flows.find(x => x.id === id));
 
   let grid = '<div class="sg">';
   for (const cat of CATS) {
-    const t = getT('c', comp.id, cat.id);
-    const isOpen = editing && editing.compId === comp.id && editing.catId === cat.id;
-    grid += `<div class="sc${t?' has':''}${isOpen?' open':''}" style="--c:${cat.color}" onclick="toggleEdit('${esc(comp.id)}','${cat.id}')">
+    const t = getT(kind, id, cat.id);
+    const isOpen = editing && editing.kind === kind && editing.id === id && editing.catId === cat.id;
+    grid += `<div class="sc${t?' has':''}${isOpen?' open':''}" style="--c:${cat.color}" onclick="toggleEdit('${kind}','${esc(id)}','${cat.id}')">
       <div class="sc-l">${cat.id}</div>
       <div class="sc-n">${cat.name}</div>
       <div class="sc-s">${cat.sub}</div>
@@ -514,9 +570,9 @@ function renderPanel() {
   grid += '</div>';
 
   let form = '';
-  if (editing && editing.compId === comp.id) {
+  if (editing && editing.kind === kind && editing.id === id) {
     const cat   = CATS.find(c => c.id === editing.catId);
-    const t     = getT('c', comp.id, cat.id) || {};
+    const t     = getT(kind, id, cat.id) || {};
     const dr    = t.dread || {};
     const score = dreadSum(t);
     const complete = dreadComplete(t);
@@ -525,9 +581,9 @@ function renderPanel() {
       <label title="${esc(d.desc)}">${d.label}</label>
       <input type="number" id="dr-${d.id}" min="1" max="10" value="${dr[d.id]||''}" placeholder="–" title="${esc(d.desc)}" oninput="liveScore()">
     </div>`).join('');
-    const exists = !!getT('c', comp.id, cat.id);
+    const exists = !!getT(kind, id, cat.id);
     form = `<div class="tf">
-      <div class="tf-hd"><div class="ls" style="background:${cat.color}">${cat.id}</div>${cat.name} – ${esc(comp.name)}</div>
+      <div class="tf-hd"><div class="ls" style="background:${cat.color}">${cat.id}</div>${cat.name} – ${esc(subjName)}</div>
       <div class="fd"><label>Hur är attackvektorn möjlig?</label>
         <textarea id="f-desc" placeholder="Beskriv hur en angripare kan utnyttja detta…">${esc(t.description||'')}</textarea>
       </div>
@@ -545,14 +601,15 @@ function renderPanel() {
         <div class="dri">${dinputs}</div>
       </div>
       <div class="fa">
-        ${exists ? `<button class="bs bs-rm" onclick="removeThreat('${esc(comp.id)}','${cat.id}')">Ta bort</button>` : ''}
+        ${exists ? `<button class="bs bs-rm" onclick="removeThreat('${kind}','${esc(id)}','${cat.id}')">Ta bort</button>` : ''}
         <button class="bs bs-cl" onclick="closeEdit()">Stäng</button>
-        <button class="bs bs-sv" onclick="saveThreat('${esc(comp.id)}','${cat.id}')">Spara</button>
+        <button class="bs bs-sv" onclick="saveThreat('${kind}','${esc(id)}','${cat.id}')">Spara</button>
       </div>
     </div>`;
   }
 
-  ap.innerHTML = `<div class="ap-hd"><h3>${esc(comp.name)}${boundary?`<span class="b-tag">${esc(boundary.name)}</span>`:''}</h3></div>${grid}${form}`;
+  const note = kind === 'f' ? '<div class="ap-note">Dataflöden är ofta där hoten uppstår — särskilt de som korsar en gräns. Tampering, Information Disclosure och Denial of Service är extra relevanta här.</div>' : '';
+  ap.innerHTML = `<div class="ap-hd"><h3>${title}</h3>${note}</div>${grid}${form}`;
   if (editing) setTimeout(() => document.getElementById('f-desc')?.focus(), 40);
 }
 
@@ -575,7 +632,7 @@ function liveScore() {
 // ── Interactions ───────────────────────────────────────────────────────
 function dirty() {
   if (!editing) return false;
-  const t = state.threats[skey('c', editing.compId, editing.catId)] || {};
+  const t = state.threats[skey(editing.kind, editing.id, editing.catId)] || {};
   const cur = id => (document.getElementById(id)?.value || '').trim();
   if (cur('f-desc') !== (t.description || '')) return true;
   if (cur('f-ctrl') !== (t.controls || '')) return true;
@@ -606,23 +663,30 @@ function onNodeClick(id) {
     return;
   }
   if (!guardDirty()) return;
-  selected = id; editing = null;
+  selected = { kind:'c', id }; editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
 function selectComp(id) {
   if (!guardDirty()) return;
-  selected = id; editing = null;
+  selected = { kind:'c', id }; editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
-function toggleEdit(compId, catId) {
+function selectFlow(id) {
+  if (flowMode) return;
+  if (!guardDirty()) return;
+  selected = { kind:'f', id }; editing = null;
+  renderCanvas(); renderPanel(); renderSidebar();
+}
+
+function toggleEdit(kind, id, catId) {
   if (editing && !guardDirty()) return;
-  editing = (editing && editing.compId === compId && editing.catId === catId) ? null : { compId, catId };
+  editing = (editing && editing.kind === kind && editing.id === id && editing.catId === catId) ? null : { kind, id, catId };
   renderPanel();
 }
 
-function saveThreat(compId, catId) {
+function saveThreat(kind, id, catId) {
   const dread = {};
   DREAD.forEach(d => {
     const v = parseInt(document.getElementById('dr-'+d.id)?.value || '0');
@@ -632,16 +696,16 @@ function saveThreat(compId, catId) {
   const controls    = document.getElementById('f-ctrl').value.trim();
   const gaps        = document.getElementById('f-gaps').value.trim();
   if (!description && !controls && !gaps && !Object.keys(dread).length) {
-    delete state.threats[skey('c', compId, catId)];
+    delete state.threats[skey(kind, id, catId)];
   } else {
-    state.threats[skey('c', compId, catId)] = { description, controls, gaps, dread };
+    state.threats[skey(kind, id, catId)] = { description, controls, gaps, dread };
   }
   persist(); editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
-function removeThreat(compId, catId) {
-  delete state.threats[skey('c', compId, catId)];
+function removeThreat(kind, id, catId) {
+  delete state.threats[skey(kind, id, catId)];
   persist(); editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
@@ -750,7 +814,7 @@ function addComponent() {
   const idx = state.components.length - 1;
   state.pos[id] = { x: 80 + (idx % 5) * 190, y: 80 + Math.floor(idx / 5) * 160 };
   persist(); closeModal('cm');
-  selected = id; editing = null;
+  selected = { kind:'c', id }; editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
@@ -762,7 +826,7 @@ function delComponent(id) {
   gone.forEach(f => CATS.forEach(cat => delete state.threats[skey('f', f.id, cat.id)]));
   state.flows = state.flows.filter(f => f.from !== id && f.to !== id);
   delete state.pos[id];
-  if (selected === id) { selected = null; editing = null; }
+  if (selected?.kind === 'c' && selected.id === id) { selected = null; editing = null; }
   persist(); renderCanvas(); renderPanel(); renderSidebar();
 }
 
@@ -770,7 +834,8 @@ function delFlow(id) {
   if (!confirm('Ta bort flödet?')) return;
   state.flows = state.flows.filter(f => f.id !== id);
   CATS.forEach(cat => delete state.threats[skey('f', id, cat.id)]);
-  persist(); renderCanvas(); renderSidebar();
+  if (selected?.kind === 'f' && selected.id === id) { selected = null; editing = null; }
+  persist(); renderCanvas(); renderPanel(); renderSidebar();
 }
 
 // ── Modals ─────────────────────────────────────────────────────────────

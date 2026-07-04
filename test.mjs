@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, cnt, sane, uid, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, cnt, sane, uid, crosses, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -228,6 +228,26 @@ test('sane avvisar ogiltig threshold', () => {
   assert.equal(M.sane({ ...M.fresh(), threshold:'25' }), false);
   assert.equal(M.sane({ ...M.fresh(), threshold:4 }), false);
   assert.equal(M.sane({ ...M.fresh(), threshold:51 }), false);
+});
+
+test('crosses: samma bid → false, olika bid → true', () => {
+  M.state = { ...M.fresh(),
+    components:[{ id:'a', bid:'b1' }, { id:'b', bid:'b1' }, { id:'c', bid:'b2' }] };
+  assert.equal(M.crosses({ from:'a', to:'b' }), false);
+  assert.equal(M.crosses({ from:'a', to:'c' }), true);
+});
+
+test('crosses: en null bid → true, båda null → false', () => {
+  M.state = { ...M.fresh(),
+    components:[{ id:'a', bid:'b1' }, { id:'b', bid:null }, { id:'c', bid:null }] };
+  assert.equal(M.crosses({ from:'a', to:'b' }), true);
+  assert.equal(M.crosses({ from:'b', to:'c' }), false);
+});
+
+test('crosses: saknad komponent → false', () => {
+  M.state = { ...M.fresh(), components:[{ id:'a', bid:'b1' }] };
+  assert.equal(M.crosses({ from:'a', to:'nope' }), false);
+  assert.equal(M.crosses({ from:'nope', to:'a' }), false);
 });
 
 test('sane avvisar ogiltiga pos/bpos-varden', () => {
