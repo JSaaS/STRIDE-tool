@@ -11,6 +11,10 @@ Arbetssätt:
 - Öppna `index.html` i en webbläsare via tillgängliga browser-verktyg.
 - Röktesta det som ändringen rör: utför de faktiska användarstegen (klicka,
   fyll i, dra) och kontrollera att resultatet stämmer med förväntan.
+- Testa den RIKTIGA interaktionen, inte en genväg: seeda inte tillstånd för att
+  hoppa över klick/drag, och simulera klick med några px rörelse (en riktig hand
+  är aldrig pixelperfekt). Seedat tillstånd och pixelperfekta klick döljer
+  interaktionsbuggar.
 - Kontrollera även att inget uppenbart gått sönder i angränsande flöden.
 - Titta efter fel i webbläsarkonsolen.
 
