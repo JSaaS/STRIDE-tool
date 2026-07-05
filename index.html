@@ -108,6 +108,21 @@ aside { width: 214px; background: white; border-right: 1px solid #e2e8f0; displa
 .sc-h { font-size: 0.65rem; color: #94a3b8; margin-top: 4px; }
 .sc.has .sc-h, .sc.open .sc-h { color: var(--c); }
 
+/* Threat list (kategori-vy) */
+.tl { margin: 0 11px 11px; border-radius: 8px; border: 1px solid #e2e8f0; overflow: hidden; }
+.tl-hd { padding: 8px 11px; font-size: 0.72rem; font-weight: 700; color: white; display: flex; align-items: center; gap: 7px; }
+.tl-item { padding: 9px 11px; border-top: 1px solid #f1f5f9; display: flex; align-items: center; gap: 8px; }
+.tl-item:hover { background: #f8fafc; }
+.tl-main { flex: 1; min-width: 0; cursor: pointer; }
+.tl-t { font-size: 0.79rem; font-weight: 600; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-p { font-size: 0.68rem; color: #64748b; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.tl-sc { font-size: 0.68rem; font-weight: 700; color: #94a3b8; flex-shrink: 0; }
+.tl-sc.crit { color: #dc2626; }
+.tl-x { background: none; border: none; cursor: pointer; color: #cbd5e1; font-size: 0.72rem; padding: 2px 4px; flex-shrink: 0; }
+.tl-x:hover { color: #dc2626; }
+.tl-add { padding: 8px 11px; border-top: 1px solid #f1f5f9; font-size: 0.74rem; font-weight: 600; color: #2563eb; cursor: pointer; background: white; }
+.tl-add:hover { background: #f8fafc; }
+
 /* Threat form */
 .tf { margin: 0 11px 11px; border-radius: 8px; padding: 13px; border: 1px solid #e2e8f0; background: #fafafa; }
 .tf-hd { font-size: 0.81rem; font-weight: 600; margin-bottom: 11px; display: flex; align-items: center; gap: 6px; }
@@ -317,7 +332,8 @@ let state = (() => {
 function persist() { localStorage.setItem('stride', JSON.stringify(state)); }
 
 let selected = null;  // { kind:'c'|'f', id }
-let editing  = null;  // { kind, id, catId }
+let editing  = null;  // { kind, id, catId, tid }
+let catOpen  = null;  // catId vars hotlista är expanderad, eller null
 let flowMode = false;
 let flowFrom = null;
 
@@ -327,6 +343,10 @@ const skey = (kind, id, cat) => `${kind}:${id}_${cat}`;
 const getT = (kind, id, cat) => state.threats[skey(kind, id, cat)];
 const cnt  = (kind, id) => CATS.reduce((n, c) => n + (getT(kind, id, c.id)?.length || 0), 0);
 const catMax = list => (list || []).reduce((m, t) => Math.max(m, dreadSum(t)), 0);
+// Tomt hot: inga textfält (inkl. title) och ingen DREAD.
+const emptyThreat = t => !t.title && !t.description && !t.controls && !t.gaps && !(t.dread && Object.keys(t.dread).length);
+// Nytt lista utan hotet med angivet tid.
+const rmTid = (list, tid) => (list || []).filter(t => t.id !== tid);
 
 function getPos(id) {
   if (!state.pos[id]) {
@@ -570,22 +590,46 @@ function renderPanel() {
   let grid = '<div class="sg">';
   for (const cat of CATS) {
     const list = getT(kind, id, cat.id) || [];
-    const t = list[0];
-    const isOpen = editing && editing.kind === kind && editing.id === id && editing.catId === cat.id;
-    grid += `<div class="sc${list.length?' has':''}${isOpen?' open':''}" style="--c:${cat.color}" onclick="toggleEdit('${kind}','${esc(id)}','${cat.id}')">
+    const ms = catMax(list);
+    const crit = ms >= state.threshold;
+    const isOpen = catOpen === cat.id;
+    grid += `<div class="sc${list.length?' has':''}${isOpen?' open':''}" style="--c:${cat.color}" onclick="toggleCat('${kind}','${esc(id)}','${cat.id}')">
       <div class="sc-l">${cat.id}</div>
       <div class="sc-n">${cat.name}</div>
       <div class="sc-s">${cat.sub}</div>
-      ${t?.description ? `<div class="sc-p">${esc(t.description)}</div>` : ''}
-      <div class="sc-h">${isOpen ? 'Redigerar…' : list.length ? 'Redigera' : 'Lägg till'}</div>
+      ${list.length > 1 ? `<div class="sc-p">${list.length} hot</div>` : list[0]?.description ? `<div class="sc-p">${esc(list[0].description)}</div>` : ''}
+      <div class="sc-h" style="${crit?'color:#dc2626':''}">${ms>0 ? `${crit?'⚠ ':''}${ms}/50` : list.length ? 'Öppna' : 'Lägg till'}</div>
     </div>`;
   }
   grid += '</div>';
 
+  let list = '';
+  if (catOpen) {
+    const cat  = CATS.find(c => c.id === catOpen);
+    const arr  = getT(kind, id, cat.id) || [];
+    const items = arr.map((t, i) => {
+      const score = dreadSum(t);
+      const crit  = score >= state.threshold;
+      return `<div class="tl-item">
+        <div class="tl-main" onclick="editThreat('${kind}','${esc(id)}','${cat.id}','${esc(t.id)}')">
+          <div class="tl-t">${t.title ? esc(t.title) : `Hot ${i+1}`}</div>
+          ${t.description ? `<div class="tl-p">${esc(t.description)}</div>` : ''}
+        </div>
+        ${score>0 ? `<span class="tl-sc${crit?' crit':''}">${crit?'⚠ ':''}${score}/50</span>` : ''}
+        <button class="tl-x" title="Ta bort hot" onclick="removeThreat('${kind}','${esc(id)}','${cat.id}','${esc(t.id)}')">✕</button>
+      </div>`;
+    }).join('');
+    list = `<div class="tl">
+      <div class="tl-hd" style="background:${cat.color}"><div class="ls" style="background:rgba(255,255,255,0.25)">${cat.id}</div>${cat.name} – ${esc(subjName)}</div>
+      ${items}
+      <div class="tl-add" onclick="addThreat('${kind}','${esc(id)}','${cat.id}')">＋ Lägg till hot</div>
+    </div>`;
+  }
+
   let form = '';
   if (editing && editing.kind === kind && editing.id === id) {
     const cat   = CATS.find(c => c.id === editing.catId);
-    const t     = getT(kind, id, cat.id)?.[0] || {};
+    const t     = (getT(kind, id, cat.id) || []).find(x => x.id === editing.tid) || {};
     const dr    = t.dread || {};
     const score = dreadSum(t);
     const complete = dreadComplete(t);
@@ -594,9 +638,12 @@ function renderPanel() {
       <label title="${esc(d.desc)}">${d.label}</label>
       <input type="number" id="dr-${d.id}" min="1" max="10" value="${dr[d.id]||''}" placeholder="–" title="${esc(d.desc)}" oninput="liveScore()">
     </div>`).join('');
-    const exists = !!getT(kind, id, cat.id);
+    const exists = (getT(kind, id, cat.id) || []).some(x => x.id === editing.tid);
     form = `<div class="tf">
       <div class="tf-hd"><div class="ls" style="background:${cat.color}">${cat.id}</div>${cat.name} – ${esc(subjName)}</div>
+      <div class="fd"><label>Titel</label>
+        <textarea id="f-title" placeholder="Kort namn på hotet, t.ex. Stulen bearer token…" style="min-height:0;height:34px">${esc(t.title||'')}</textarea>
+      </div>
       <div class="fd"><label>Hur är attackvektorn möjlig?</label>
         <textarea id="f-desc" placeholder="Beskriv hur en angripare kan utnyttja detta…">${esc(t.description||'')}</textarea>
       </div>
@@ -614,7 +661,7 @@ function renderPanel() {
         <div class="dri">${dinputs}</div>
       </div>
       <div class="fa">
-        ${exists ? `<button class="bs bs-rm" onclick="removeThreat('${kind}','${esc(id)}','${cat.id}')">Ta bort</button>` : ''}
+        ${exists ? `<button class="bs bs-rm" onclick="removeThreat('${kind}','${esc(id)}','${cat.id}','${esc(editing.tid)}')">Ta bort</button>` : ''}
         <button class="bs bs-cl" onclick="closeEdit()">Stäng</button>
         <button class="bs bs-sv" onclick="saveThreat('${kind}','${esc(id)}','${cat.id}')">Spara</button>
       </div>
@@ -622,8 +669,8 @@ function renderPanel() {
   }
 
   const note = kind === 'f' ? '<div class="ap-note">Dataflöden är ofta där hoten uppstår — särskilt de som korsar en gräns. Tampering, Information Disclosure och Denial of Service är extra relevanta här.</div>' : '';
-  ap.innerHTML = `<div class="ap-hd"><h3>${title}</h3>${note}</div>${grid}${form}`;
-  if (editing) setTimeout(() => document.getElementById('f-desc')?.focus(), 40);
+  ap.innerHTML = `<div class="ap-hd"><h3>${title}</h3>${note}</div>${grid}${list}${form}`;
+  if (editing) setTimeout(() => document.getElementById('f-title')?.focus(), 40);
 }
 
 function liveScore() {
@@ -645,8 +692,9 @@ function liveScore() {
 // ── Interactions ───────────────────────────────────────────────────────
 function dirty() {
   if (!editing) return false;
-  const t = getT(editing.kind, editing.id, editing.catId)?.[0] || {};
+  const t = (getT(editing.kind, editing.id, editing.catId) || []).find(x => x.id === editing.tid) || {};
   const cur = id => (document.getElementById(id)?.value || '').trim();
+  if (cur('f-title') !== (t.title || '')) return true;
   if (cur('f-desc') !== (t.description || '')) return true;
   if (cur('f-ctrl') !== (t.controls || '')) return true;
   if (cur('f-gaps') !== (t.gaps || '')) return true;
@@ -676,26 +724,40 @@ function onNodeClick(id) {
     return;
   }
   if (!guardDirty()) return;
-  selected = { kind:'c', id }; editing = null;
+  selected = { kind:'c', id }; editing = null; catOpen = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
 function selectComp(id) {
   if (!guardDirty()) return;
-  selected = { kind:'c', id }; editing = null;
+  selected = { kind:'c', id }; editing = null; catOpen = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
 function selectFlow(id) {
   if (flowMode) return;
   if (!guardDirty()) return;
-  selected = { kind:'f', id }; editing = null;
+  selected = { kind:'f', id }; editing = null; catOpen = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
-function toggleEdit(kind, id, catId) {
-  if (editing && !guardDirty()) return;
-  editing = (editing && editing.kind === kind && editing.id === id && editing.catId === catId) ? null : { kind, id, catId };
+function toggleCat(kind, id, catId) {
+  if (!guardDirty()) return;
+  catOpen = catOpen === catId ? null : catId;
+  editing = null;
+  renderPanel();
+}
+
+function editThreat(kind, id, catId, tid) {
+  if (!guardDirty()) return;
+  editing = { kind, id, catId, tid };
+  renderPanel();
+}
+
+function addThreat(kind, id, catId) {
+  if (!guardDirty()) return;
+  catOpen = catId;
+  editing = { kind, id, catId, tid: uid() };
   renderPanel();
 }
 
@@ -705,21 +767,32 @@ function saveThreat(kind, id, catId) {
     const v = parseInt(document.getElementById('dr-'+d.id)?.value || '0');
     if (v >= 1 && v <= 10) dread[d.id] = v;
   });
+  const title       = document.getElementById('f-title').value.trim();
   const description = document.getElementById('f-desc').value.trim();
   const controls    = document.getElementById('f-ctrl').value.trim();
   const gaps        = document.getElementById('f-gaps').value.trim();
-  if (!description && !controls && !gaps && !Object.keys(dread).length) {
-    delete state.threats[skey(kind, id, catId)];
+  const key = skey(kind, id, catId);
+  const tid = editing.tid;
+  const t = { title, description, controls, gaps, dread };
+  let list = getT(kind, id, catId) || [];
+  if (emptyThreat(t)) {
+    list = rmTid(list, tid);
+  } else if (list.some(x => x.id === tid)) {
+    list = list.map(x => x.id === tid ? { id: tid, ...t } : x);
   } else {
-    const prev = getT(kind, id, catId)?.[0];
-    state.threats[skey(kind, id, catId)] = [{ id: prev?.id || uid(), title: prev?.title || '', description, controls, gaps, dread }];
+    list = [...list, { id: tid, ...t }];
   }
+  if (list.length) state.threats[key] = list; else delete state.threats[key];
   persist(); editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
-function removeThreat(kind, id, catId) {
-  delete state.threats[skey(kind, id, catId)];
+function removeThreat(kind, id, catId, tid) {
+  if (!confirm('Ta bort hotet?')) return;
+  if (editing && editing.tid !== tid && !guardDirty()) return;
+  const key = skey(kind, id, catId);
+  const list = rmTid(getT(kind, id, catId), tid);
+  if (list.length) state.threats[key] = list; else delete state.threats[key];
   persist(); editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
@@ -828,7 +901,7 @@ function addComponent() {
   const idx = state.components.length - 1;
   state.pos[id] = { x: 80 + (idx % 5) * 190, y: 80 + Math.floor(idx / 5) * 160 };
   persist(); closeModal('cm');
-  selected = { kind:'c', id }; editing = null;
+  selected = { kind:'c', id }; editing = null; catOpen = null;
   renderCanvas(); renderPanel(); renderSidebar();
 }
 
@@ -840,7 +913,7 @@ function delComponent(id) {
   gone.forEach(f => CATS.forEach(cat => delete state.threats[skey('f', f.id, cat.id)]));
   state.flows = state.flows.filter(f => f.from !== id && f.to !== id);
   delete state.pos[id];
-  if (selected?.kind === 'c' && selected.id === id) { selected = null; editing = null; }
+  if (selected?.kind === 'c' && selected.id === id) { selected = null; editing = null; catOpen = null; }
   persist(); renderCanvas(); renderPanel(); renderSidebar();
 }
 
@@ -848,7 +921,7 @@ function delFlow(id) {
   if (!confirm('Ta bort flödet?')) return;
   state.flows = state.flows.filter(f => f.id !== id);
   CATS.forEach(cat => delete state.threats[skey('f', id, cat.id)]);
-  if (selected?.kind === 'f' && selected.id === id) { selected = null; editing = null; }
+  if (selected?.kind === 'f' && selected.id === id) { selected = null; editing = null; catOpen = null; }
   persist(); renderCanvas(); renderPanel(); renderSidebar();
 }
 
@@ -906,7 +979,7 @@ function openModel() {
       const hasData = state.components.length || state.boundaries.length || state.flows.length || Object.keys(state.threats).length;
       if (hasData && !confirm('Detta ersätter din nuvarande analys och kan inte ångras. Spara den först om du vill behålla den. Fortsätta?')) return;
       state = { ...fresh(), ...obj.state, threshold: obj.state.threshold ?? 25 };
-      selected = null; editing = null; flowMode = false; flowFrom = null;
+      selected = null; editing = null; catOpen = null; flowMode = false; flowFrom = null;
       persist();
       document.getElementById('session-name').value = state.name;
       document.getElementById('threshold').value    = state.threshold;

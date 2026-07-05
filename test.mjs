@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, cnt, catMax, sane, uid, crosses, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -212,6 +212,23 @@ test('getT returnerar arrayen; cnt raknar flera hotobjekt', () => {
   assert.equal(M.getT('c', 'abc', 'D'), undefined);
   assert.equal(M.cnt('c', 'abc'), 3);
   assert.equal(M.maxDread('c', 'abc'), 15);
+});
+
+test('emptyThreat: helt tomt hot ar tomt, ifyllt falt gor det icke-tomt', () => {
+  assert.equal(M.emptyThreat({ title:'', description:'', controls:'', gaps:'', dread:{} }), true);
+  assert.equal(M.emptyThreat({ title:'', description:'', controls:'', gaps:'' }), true);
+  assert.equal(M.emptyThreat({ title:'x', description:'', controls:'', gaps:'', dread:{} }), false);
+  assert.equal(M.emptyThreat({ title:'', description:'d', controls:'', gaps:'' }), false);
+  assert.equal(M.emptyThreat({ title:'', description:'', controls:'', gaps:'', dread:{ dmg:5 } }), false);
+});
+
+test('rmTid tar bort hotet med angivet id och lamnar resten', () => {
+  const J = v => JSON.stringify(v);
+  const list = [{ id:'a' }, { id:'b' }, { id:'c' }];
+  assert.equal(J(M.rmTid(list, 'b')), J([{ id:'a' }, { id:'c' }]));
+  assert.equal(J(M.rmTid(list, 'x')), J(list)); // okant id → orort (ny array)
+  assert.equal(J(M.rmTid(undefined, 'a')), J([]));
+  assert.equal(J(M.rmTid([{ id:'a' }], 'a')), J([])); // tom lista efter borttagning
 });
 
 test('sane godkanner fresh-state', () => {
