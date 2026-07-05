@@ -252,6 +252,8 @@ const DREAD = [
 ];
 
 // ── State ──────────────────────────────────────────────────────────────
+const uid = () => Math.random().toString(36).slice(2, 9);
+
 function fresh() {
   return { name:'', boundaries:[], components:[], threats:{}, pos:{}, bpos:{}, flows:[], threshold:25 };
 }
@@ -267,8 +269,11 @@ function sane(s) {
   if ((s.flows || []).some(f => !id(f?.id) || !id(f?.from) || !id(f?.to))) return false;
   if (Object.entries(s.pos || {}).some(([k, p]) => !id(k) || !obj(p) || !num(p.x) || !num(p.y))) return false;
   if (Object.entries(s.bpos || {}).some(([k, p]) => !id(k) || !obj(p) || !num(p.x) || !num(p.y) || !num(p.w) || !num(p.h))) return false;
-  if (Object.entries(s.threats || {}).some(([k, t]) => !/^[cf]:[a-z0-9]{1,9}_[STRIDE]$/.test(k) || !obj(t) ||
-      (t.dread != null && (!obj(t.dread) || Object.values(t.dread).some(v => !Number.isInteger(v) || v < 1 || v > 10))))) return false;
+  const str = v => typeof v === 'string';
+  if (Object.entries(s.threats || {}).some(([k, list]) => !/^[cf]:[a-z0-9]{1,9}_[STRIDE]$/.test(k) ||
+      !Array.isArray(list) || list.length === 0 || list.some(t => !obj(t) || !id(t.id) ||
+        ['title','description','controls','gaps'].some(f => t[f] != null && !str(t[f])) ||
+        (t.dread != null && (!obj(t.dread) || Object.values(t.dread).some(v => !Number.isInteger(v) || v < 1 || v > 10)))))) return false;
   if (s.threshold != null && !(num(s.threshold) && s.threshold >= 5 && s.threshold <= 50)) return false;
   return true;
 }
@@ -282,6 +287,13 @@ function migrate(s) {
         if (!(('c:' + k) in s.threats)) s.threats['c:' + k] = s.threats[k];
         delete s.threats[k];
       }
+    }
+    // Värde-normalisering: enstaka hotobjekt → array; töm-array/ogiltigt → bort.
+    for (const k of Object.keys(s.threats)) {
+      const v = s.threats[k];
+      if (Array.isArray(v)) { if (!v.length) delete s.threats[k]; }
+      else if (v != null && typeof v === 'object') s.threats[k] = [{ id: uid(), title:'', ...v }];
+      else delete s.threats[k];
     }
   }
   return s;
@@ -310,11 +322,11 @@ let flowMode = false;
 let flowFrom = null;
 
 // ── Helpers ────────────────────────────────────────────────────────────
-const uid  = () => Math.random().toString(36).slice(2, 9);
 const esc  = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const skey = (kind, id, cat) => `${kind}:${id}_${cat}`;
 const getT = (kind, id, cat) => state.threats[skey(kind, id, cat)];
-const cnt  = (kind, id) => CATS.filter(c => getT(kind, id, c.id)).length;
+const cnt  = (kind, id) => CATS.reduce((n, c) => n + (getT(kind, id, c.id)?.length || 0), 0);
+const catMax = list => (list || []).reduce((m, t) => Math.max(m, dreadSum(t)), 0);
 
 function getPos(id) {
   if (!state.pos[id]) {
@@ -343,8 +355,7 @@ function dreadComplete(t) {
 }
 
 function maxDread(kind, id) {
-  const scores = CATS.map(c => dreadSum(getT(kind, id, c.id))).filter(s => s > 0);
-  return scores.length ? Math.max(...scores) : 0;
+  return CATS.reduce((m, c) => Math.max(m, catMax(getT(kind, id, c.id))), 0);
 }
 
 // Korsar flödet en trust boundary? Beräknas dynamiskt, sparas aldrig.
@@ -456,8 +467,8 @@ function renderCanvas() {
     el.style.top  = p.y + 'px';
 
     const dots = CATS.map(cat => {
-      const t = getT('c', c.id, cat.id);
-      return `<div class="dot" style="background:${t ? cat.color : '#e2e8f0'}" title="${cat.name}"></div>`;
+      const has = getT('c', c.id, cat.id)?.length;
+      return `<div class="dot" style="background:${has ? cat.color : '#e2e8f0'}" title="${cat.name}"></div>`;
     }).join('');
 
     const scoreHtml = ms > 0
@@ -558,14 +569,15 @@ function renderPanel() {
 
   let grid = '<div class="sg">';
   for (const cat of CATS) {
-    const t = getT(kind, id, cat.id);
+    const list = getT(kind, id, cat.id) || [];
+    const t = list[0];
     const isOpen = editing && editing.kind === kind && editing.id === id && editing.catId === cat.id;
-    grid += `<div class="sc${t?' has':''}${isOpen?' open':''}" style="--c:${cat.color}" onclick="toggleEdit('${kind}','${esc(id)}','${cat.id}')">
+    grid += `<div class="sc${list.length?' has':''}${isOpen?' open':''}" style="--c:${cat.color}" onclick="toggleEdit('${kind}','${esc(id)}','${cat.id}')">
       <div class="sc-l">${cat.id}</div>
       <div class="sc-n">${cat.name}</div>
       <div class="sc-s">${cat.sub}</div>
       ${t?.description ? `<div class="sc-p">${esc(t.description)}</div>` : ''}
-      <div class="sc-h">${isOpen ? 'Redigerar…' : t ? 'Redigera' : 'Lägg till'}</div>
+      <div class="sc-h">${isOpen ? 'Redigerar…' : list.length ? 'Redigera' : 'Lägg till'}</div>
     </div>`;
   }
   grid += '</div>';
@@ -573,7 +585,7 @@ function renderPanel() {
   let form = '';
   if (editing && editing.kind === kind && editing.id === id) {
     const cat   = CATS.find(c => c.id === editing.catId);
-    const t     = getT(kind, id, cat.id) || {};
+    const t     = getT(kind, id, cat.id)?.[0] || {};
     const dr    = t.dread || {};
     const score = dreadSum(t);
     const complete = dreadComplete(t);
@@ -633,7 +645,7 @@ function liveScore() {
 // ── Interactions ───────────────────────────────────────────────────────
 function dirty() {
   if (!editing) return false;
-  const t = state.threats[skey(editing.kind, editing.id, editing.catId)] || {};
+  const t = getT(editing.kind, editing.id, editing.catId)?.[0] || {};
   const cur = id => (document.getElementById(id)?.value || '').trim();
   if (cur('f-desc') !== (t.description || '')) return true;
   if (cur('f-ctrl') !== (t.controls || '')) return true;
@@ -699,7 +711,8 @@ function saveThreat(kind, id, catId) {
   if (!description && !controls && !gaps && !Object.keys(dread).length) {
     delete state.threats[skey(kind, id, catId)];
   } else {
-    state.threats[skey(kind, id, catId)] = { description, controls, gaps, dread };
+    const prev = getT(kind, id, catId)?.[0];
+    state.threats[skey(kind, id, catId)] = [{ id: prev?.id || uid(), title: prev?.title || '', description, controls, gaps, dread }];
   }
   persist(); editing = null;
   renderCanvas(); renderPanel(); renderSidebar();
@@ -865,7 +878,7 @@ document.getElementById('threshold').addEventListener('change', e => {
 
 // ── Spara / Öppna ──────────────────────────────────────────────────────
 function saveModel() {
-  const data = JSON.stringify({ app:'stride-tool', version:2, state }, null, 2);
+  const data = JSON.stringify({ app:'stride-tool', version:3, state }, null, 2);
   const safe = (state.name || 'stride').replace(/[^a-z0-9åäö_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'stride';
   const fname = `${safe}-${new Date().toLocaleDateString('sv-SE')}.json`;
   const url = URL.createObjectURL(new Blob([data], { type:'application/json' }));
@@ -914,22 +927,24 @@ function exportReport() {
   // Räknar in dokumenterade hot och kritiska i totalThreats/critThreats.
   const thead = `<thead><tr><th>Kategori</th><th>Hur möjlig</th><th>Befintliga skydd</th><th>Luckor</th><th title="Damage">D</th><th title="Reproducibility">R</th><th title="Affected users">A</th><th title="Exploitability">E</th><th title="Discoverability">Disc</th><th>Summa</th></tr></thead>`;
   const buildTable = (kind, id) => {
-    const cats = CATS.filter(cat => getT(kind, id, cat.id));
-    let rows = '';
-    for (const cat of cats) {
-      const t = getT(kind, id, cat.id);
-      const score = dreadSum(t);
-      const crit  = score > 0 && score >= state.threshold;
-      totalThreats++; if (crit) critThreats++;
-      const dvals = DREAD.map(d => `<td style="text-align:center">${t.dread?.[d.id]||'–'}</td>`).join('');
-      rows += `<tr style="${crit?'background:#fff5f5':''}">
-        <td><span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:${cat.color};color:white;font-size:.68rem;font-weight:800;margin-right:5px;vertical-align:middle">${cat.id}</span><strong>${cat.name}</strong>${crit?' <span style="color:#dc2626">⚠</span>':''}</td>
-        <td>${esc(t.description||'–')}</td><td>${esc(t.controls||'–')}</td><td>${esc(t.gaps||'–')}</td>
-        ${dvals}
-        <td style="text-align:center;font-weight:700;color:${crit?'#dc2626':score>0?'#059669':'#94a3b8'}">${score||'–'}</td>
-      </tr>`;
+    let rows = '', n = 0;
+    for (const cat of CATS) {
+      const list = getT(kind, id, cat.id) || [];
+      for (const t of list) {
+        n++;
+        const score = dreadSum(t);
+        const crit  = score > 0 && score >= state.threshold;
+        totalThreats++; if (crit) critThreats++;
+        const dvals = DREAD.map(d => `<td style="text-align:center">${t.dread?.[d.id]||'–'}</td>`).join('');
+        rows += `<tr style="${crit?'background:#fff5f5':''}">
+          <td><span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:${cat.color};color:white;font-size:.68rem;font-weight:800;margin-right:5px;vertical-align:middle">${cat.id}</span><strong>${cat.name}</strong>${crit?' <span style="color:#dc2626">⚠</span>':''}</td>
+          <td>${esc(t.description||'–')}</td><td>${esc(t.controls||'–')}</td><td>${esc(t.gaps||'–')}</td>
+          ${dvals}
+          <td style="text-align:center;font-weight:700;color:${crit?'#dc2626':score>0?'#059669':'#94a3b8'}">${score||'–'}</td>
+        </tr>`;
+      }
     }
-    return { n: cats.length, table: cats.length===0 ? '<p class="et">Inga hot identifierade.</p>' :
+    return { n, table: n===0 ? '<p class="et">Inga hot identifierade.</p>' :
       `<table>${thead}<tbody>${rows}</tbody></table>` };
   };
 
