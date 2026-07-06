@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, maxDreadBy, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -447,6 +447,34 @@ test('statusCount raknar hot per status over flera kategorier', () => {
 test('statusCount defaultar hot utan status till open', () => {
   M.state = { ...M.fresh(), threats:{ 'c:abc_S':[{ id:'a' }] } };
   assert.equal(JSON.stringify(M.statusCount('c', 'abc')), JSON.stringify({ open:1, accepted:0, mitigated:0 }));
+});
+
+test('maxDreadBy: max over open+accepted, exkluderar mitigated', () => {
+  M.state = { ...M.fresh(), threats: {
+    [M.skey('c','c1','S')]: [{ id:'a', status:'open',      dread:{ dmg:2, rep:2, aff:2, exp:2, dis:2 } }],  // 10
+    [M.skey('c','c1','T')]: [{ id:'b', status:'accepted',  dread:{ dmg:3, rep:3, aff:3, exp:3, dis:3 } }],  // 15
+    [M.skey('c','c1','E')]: [{ id:'c', status:'mitigated', dread:{ dmg:9, rep:9, aff:9, exp:9, dis:9 } }],  // 45
+  } };
+  assert.equal(M.maxDreadBy('c', 'c1', ['open','accepted']), 15);
+  assert.equal(M.maxDreadBy('c', 'c1', ['open']), 10);
+  assert.equal(M.maxDreadBy('c', 'c1', ['accepted']), 15);
+  assert.equal(M.maxDreadBy('c', 'c1', ['mitigated']), 45);
+});
+
+test('maxDreadBy: hot utan status raknas som open', () => {
+  M.state = { ...M.fresh(), threats: {
+    [M.skey('c','c1','S')]: [{ id:'a', dread:{ dmg:1, rep:1, aff:1, exp:1, dis:1 } }], // 5
+  } };
+  assert.equal(M.maxDreadBy('c', 'c1', ['open']), 5);
+  assert.equal(M.maxDreadBy('c', 'c1', ['accepted']), 0);
+});
+
+test('maxDreadBy: 0 nar inga hot matchar statuslistan', () => {
+  M.state = { ...M.fresh(), threats: {
+    [M.skey('c','c1','S')]: [{ id:'a', status:'mitigated', dread:{ dmg:5, rep:5, aff:5, exp:5, dis:5 } }],
+  } };
+  assert.equal(M.maxDreadBy('c', 'c1', ['open','accepted']), 0);
+  assert.equal(M.maxDreadBy('c', 'nope', ['open','accepted']), 0);
 });
 
 test('STATUSES har de tre livscykel-lagena', () => {
