@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, maxDreadBy, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, reportStats, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, maxDreadBy, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, reportStats, topThreats, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -509,6 +509,81 @@ test('reportStats: statusfordelning over komponenter + floden', () => {
   assert.equal(s.open, 2);      // 'a' + 'd' (default)
   assert.equal(s.accepted, 1);
   assert.equal(s.mitigated, 1);
+});
+
+test('topThreats: sorterar fallande pa dreadSum', () => {
+  M.state = { ...M.fresh(), components:[{ id:'c1', name:'API' }], threats:{
+    [M.skey('c','c1','S')]:[{ id:'a', status:'open', dread:{ dmg:1, rep:1, aff:1, exp:1, dis:1 } }], // 5
+    [M.skey('c','c1','T')]:[{ id:'b', status:'open', dread:{ dmg:4, rep:4, aff:4, exp:4, dis:4 } }], // 20
+    [M.skey('c','c1','E')]:[{ id:'c', status:'open', dread:{ dmg:2, rep:2, aff:2, exp:2, dis:2 } }], // 10
+  } };
+  assert.equal(JSON.stringify(M.topThreats(10).map(t => t.score)), JSON.stringify([20, 10, 5]));
+});
+
+test('topThreats: exkluderar mitigerade, inkluderar open+accepted', () => {
+  M.state = { ...M.fresh(), components:[{ id:'c1', name:'API' }], threats:{
+    [M.skey('c','c1','S')]:[{ id:'a', status:'open',      dread:hi }],
+    [M.skey('c','c1','T')]:[{ id:'b', status:'accepted',  dread:hi }],
+    [M.skey('c','c1','E')]:[{ id:'c', status:'mitigated', dread:hi }],
+  } };
+  const ids = M.topThreats(10).map(t => t.status);
+  assert.equal(ids.length, 2);
+  assert.ok(ids.includes('open') && ids.includes('accepted') && !ids.includes('mitigated'));
+});
+
+test('topThreats: hot utan status raknas som open', () => {
+  M.state = { ...M.fresh(), components:[{ id:'c1', name:'API' }], threats:{
+    [M.skey('c','c1','S')]:[{ id:'a', dread:hi }],
+  } };
+  const top = M.topThreats(10);
+  assert.equal(top.length, 1);
+  assert.equal(top[0].status, 'open');
+});
+
+test('topThreats: blandar komponent- och flodeshot', () => {
+  M.state = { ...M.fresh(),
+    components:[{ id:'c1', name:'API', bid:'b1' }, { id:'c2', name:'DB', bid:'b2' }],
+    flows:[{ id:'f1', from:'c1', to:'c2', label:'SQL' }],
+    threats:{
+      [M.skey('c','c1','S')]:[{ id:'a', status:'open', dread:{ dmg:3, rep:3, aff:3, exp:3, dis:3 } }], // 15
+      [M.skey('f','f1','T')]:[{ id:'b', status:'open', dread:{ dmg:5, rep:5, aff:5, exp:5, dis:5 } }], // 25
+    } };
+  const top = M.topThreats(10);
+  assert.equal(top.length, 2);
+  assert.equal(top[0].kind, 'f');
+  assert.equal(top[0].subject, 'API → DB (SQL)');
+  assert.equal(top[0].crossing, true);
+  assert.equal(top[1].kind, 'c');
+  assert.equal(top[1].subject, 'API');
+});
+
+test('topThreats: titellost hot far Hot N-fallback bara nar kategorin har flera', () => {
+  M.state = { ...M.fresh(), components:[{ id:'c1', name:'API' }], threats:{
+    [M.skey('c','c1','S')]:[{ id:'a', status:'open', dread:{ dmg:1, rep:1, aff:1, exp:1, dis:1 } }], // ensamt → ''
+    [M.skey('c','c1','T')]:[
+      { id:'b', title:'Namngivet', status:'open', dread:{ dmg:2, rep:2, aff:2, exp:2, dis:2 } },
+      { id:'c', status:'open', dread:{ dmg:3, rep:3, aff:3, exp:3, dis:3 } }, // titellost, index 1 → 'Hot 2'
+    ],
+  } };
+  const flat = M.topThreats(10);
+  assert.equal(flat.find(t => t.cat === 'S').title, '');                    // ensamt titellost
+  assert.ok(flat.some(t => t.cat === 'T' && t.title === 'Hot 2'));          // flera → Hot N
+});
+
+test('topThreats: respekterar limit', () => {
+  M.state = { ...M.fresh(), components:[{ id:'c1', name:'API' }], threats:{
+    [M.skey('c','c1','S')]:[{ id:'a', status:'open', dread:hi }, { id:'b', status:'open', dread:hi }, { id:'c', status:'open', dread:hi }],
+  } };
+  assert.equal(M.topThreats(2).length, 2);
+});
+
+test('topThreats: tom vid inga oppna/accepterade', () => {
+  M.state = { ...M.fresh(), components:[{ id:'c1', name:'API' }], threats:{
+    [M.skey('c','c1','S')]:[{ id:'a', status:'mitigated', dread:hi }],
+  } };
+  assert.equal(M.topThreats(10).length, 0);
+  M.state = M.fresh();
+  assert.equal(M.topThreats(10).length, 0);
 });
 
 test('reportStats: kritiska skiljer oppna fran atgardade', () => {
