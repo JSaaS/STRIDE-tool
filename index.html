@@ -258,6 +258,8 @@ const CATS = [
   { id:'E', name:'Elevation of Privilege', sub:'Otillåten behörighet',  color:'#059669' },
 ];
 
+const STATUSES = [{ id:'open', name:'Öppen' }, { id:'accepted', name:'Accepterad' }, { id:'mitigated', name:'Åtgärdad' }];
+
 const DREAD = [
   { id:'dmg', label:'Damage',   desc:'Hur allvarlig blir skadan om hotet realiseras?' },
   { id:'rep', label:'Repro.',   desc:'Hur lätt går attacken att upprepa?' },
@@ -280,14 +282,15 @@ function sane(s) {
   if (['boundaries','components','flows'].some(k => s[k] != null && !Array.isArray(s[k]))) return false;
   if (['threats','pos','bpos'].some(k => s[k] != null && !obj(s[k]))) return false;
   if ((s.boundaries || []).some(b => !id(b?.id))) return false;
-  if ((s.components || []).some(c => !id(c?.id) || (c?.bid != null && !id(c.bid)))) return false;
+  if ((s.components || []).some(c => !id(c?.id) || (c?.bid != null && !id(c.bid)) || (c?.analysisDone != null && typeof c.analysisDone !== 'boolean'))) return false;
   if ((s.flows || []).some(f => !id(f?.id) || !id(f?.from) || !id(f?.to))) return false;
   if (Object.entries(s.pos || {}).some(([k, p]) => !id(k) || !obj(p) || !num(p.x) || !num(p.y))) return false;
   if (Object.entries(s.bpos || {}).some(([k, p]) => !id(k) || !obj(p) || !num(p.x) || !num(p.y) || !num(p.w) || !num(p.h))) return false;
   const str = v => typeof v === 'string';
   if (Object.entries(s.threats || {}).some(([k, list]) => !/^[cf]:[a-z0-9]{1,9}_[STRIDE]$/.test(k) ||
       !Array.isArray(list) || list.length === 0 || list.some(t => !obj(t) || !id(t.id) ||
-        ['title','description','controls','gaps'].some(f => t[f] != null && !str(t[f])) ||
+        ['title','description','controls','gaps','mitigation','owner'].some(f => t[f] != null && !str(t[f])) ||
+        (t.status != null && !STATUSES.some(x => x.id === t.status)) ||
         (t.dread != null && (!obj(t.dread) || Object.values(t.dread).some(v => !Number.isInteger(v) || v < 1 || v > 10)))))) return false;
   if (s.threshold != null && !(num(s.threshold) && s.threshold >= 5 && s.threshold <= 50)) return false;
   return true;
@@ -309,6 +312,22 @@ function migrate(s) {
       if (Array.isArray(v)) { if (!v.length) delete s.threats[k]; }
       else if (v != null && typeof v === 'object') s.threats[k] = [{ id: uid(), title:'', ...v }];
       else delete s.threats[k];
+    }
+    // Livscykel-normalisering: status/mitigation/owner på varje hot.
+    for (const list of Object.values(s.threats)) {
+      if (!Array.isArray(list)) continue;
+      for (const t of list) {
+        if (!t || typeof t !== 'object') continue;
+        if (!STATUSES.some(x => x.id === t.status)) t.status = 'open';
+        if (typeof t.mitigation !== 'string') t.mitigation = '';
+        if (typeof t.owner !== 'string') t.owner = '';
+      }
+    }
+  }
+  // analysisDone på varje komponent.
+  if (Array.isArray(s?.components)) {
+    for (const c of s.components) {
+      if (c && typeof c === 'object' && typeof c.analysisDone !== 'boolean') c.analysisDone = false;
     }
   }
   return s;
@@ -376,6 +395,22 @@ function dreadComplete(t) {
 
 function maxDread(kind, id) {
   return CATS.reduce((m, c) => Math.max(m, catMax(getT(kind, id, c.id))), 0);
+}
+
+// Täckningsläge för en komponent: 'unanalyzed' | 'started' | 'analyzed'.
+function coverage(comp) {
+  if (comp.analysisDone === true) return 'analyzed';
+  return cnt('c', comp.id) ? 'started' : 'unanalyzed';
+}
+
+// Antal hot per status för ett subjekt, över alla kategorier.
+function statusCount(kind, id) {
+  const n = { open:0, accepted:0, mitigated:0 };
+  CATS.forEach(c => (getT(kind, id, c.id) || []).forEach(t => {
+    const s = STATUSES.some(x => x.id === t.status) ? t.status : 'open';
+    n[s]++;
+  }));
+  return n;
 }
 
 // Korsar flödet en trust boundary? Beräknas dynamiskt, sparas aldrig.
@@ -773,8 +808,10 @@ function saveThreat(kind, id, catId) {
   const gaps        = document.getElementById('f-gaps').value.trim();
   const key = skey(kind, id, catId);
   const tid = editing.tid;
-  const t = { title, description, controls, gaps, dread };
   let list = getT(kind, id, catId) || [];
+  const prev = list.find(x => x.id === tid);
+  const t = { title, description, controls, gaps, dread,
+    status: prev?.status || 'open', mitigation: prev?.mitigation || '', owner: prev?.owner || '' };
   if (emptyThreat(t)) {
     list = rmTid(list, tid);
   } else if (list.some(x => x.id === tid)) {
@@ -897,7 +934,7 @@ function addComponent() {
   if (!guardDirty()) return;
   const bid = document.getElementById('c-bid').value || null;
   const id  = uid();
-  state.components.push({ id, name, bid });
+  state.components.push({ id, name, bid, analysisDone:false });
   const idx = state.components.length - 1;
   state.pos[id] = { x: 80 + (idx % 5) * 190, y: 80 + Math.floor(idx / 5) * 160 };
   persist(); closeModal('cm');
@@ -951,7 +988,7 @@ document.getElementById('threshold').addEventListener('change', e => {
 
 // ── Spara / Öppna ──────────────────────────────────────────────────────
 function saveModel() {
-  const data = JSON.stringify({ app:'stride-tool', version:3, state }, null, 2);
+  const data = JSON.stringify({ app:'stride-tool', version:4, state }, null, 2);
   const safe = (state.name || 'stride').replace(/[^a-z0-9åäö_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'stride';
   const fname = `${safe}-${new Date().toLocaleDateString('sv-SE')}.json`;
   const url = URL.createObjectURL(new Blob([data], { type:'application/json' }));
