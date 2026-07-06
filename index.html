@@ -473,6 +473,26 @@ function statusCount(kind, id) {
   return n;
 }
 
+// Aggregerad täcknings- och statusöversikt för rapporten. DOM-fri.
+// Kritiskt hot = dreadSum >= threshold. Mitigerade räknas aldrig som kritiska.
+function reportStats() {
+  const s = { comps: state.components.length, unanalyzed: 0, started: 0, analyzed: 0, analyzedNoThreat: 0,
+    open: 0, accepted: 0, mitigated: 0, crit: 0, critOpen: 0 };
+  state.components.forEach(comp => {
+    const cov = coverage(comp);
+    s[cov]++;
+    if (cov === 'analyzed' && cnt('c', comp.id) === 0) s.analyzedNoThreat++;
+  });
+  const tally = (kind, id) => CATS.forEach(c => (getT(kind, id, c.id) || []).forEach(t => {
+    const st = STATUSES.some(x => x.id === t.status) ? t.status : 'open';
+    s[st]++;
+    if (st !== 'mitigated' && dreadSum(t) >= state.threshold) { s.crit++; if (st === 'open') s.critOpen++; }
+  }));
+  state.components.forEach(c => tally('c', c.id));
+  state.flows.forEach(f => tally('f', f.id));
+  return s;
+}
+
 // Korsar flödet en trust boundary? Beräknas dynamiskt, sparas aldrig.
 function crosses(f) {
   const from = state.components.find(c => c.id === f.from);
@@ -1134,20 +1154,21 @@ function openModel() {
 function exportReport() {
   const sessionName = state.name || 'STRIDE Analys';
   const date = new Date().toLocaleDateString('sv-SE', {year:'numeric', month:'long', day:'numeric'});
-  let totalThreats = 0, critThreats = 0;
+  let totalThreats = 0;
 
   // Bygg hotrader + hottabell för ett subjekt (komponent eller flöde).
-  // Räknar in dokumenterade hot och kritiska i totalThreats/critThreats.
-  const thead = `<thead><tr><th>Kategori</th><th>Hur möjlig</th><th>Befintliga skydd</th><th>Luckor</th><th title="Damage">D</th><th title="Reproducibility">R</th><th title="Affected users">A</th><th title="Exploitability">E</th><th title="Discoverability">Disc</th><th>Summa</th></tr></thead>`;
+  // Räknar in dokumenterade hot i totalThreats.
+  const thead = `<thead><tr><th>Kategori</th><th>Hur möjlig</th><th>Befintliga skydd</th><th>Luckor</th><th title="Damage">D</th><th title="Reproducibility">R</th><th title="Affected users">A</th><th title="Exploitability">E</th><th title="Discoverability">Disc</th><th>Summa</th><th>Status</th><th>Åtgärd</th><th>Ansvarig</th></tr></thead>`;
   const buildTable = (kind, id) => {
     let rows = '', n = 0;
     for (const cat of CATS) {
       const list = getT(kind, id, cat.id) || [];
       list.forEach((t, i) => {
         n++;
+        const st    = STATUSES.some(x => x.id === t.status) ? t.status : 'open';
         const score = dreadSum(t);
-        const crit  = score > 0 && score >= state.threshold;
-        totalThreats++; if (crit) critThreats++;
+        const crit  = score > 0 && score >= state.threshold && st !== 'mitigated';
+        totalThreats++;
         const label = t.title ? esc(t.title) : (list.length > 1 ? `Hot ${i+1}` : '');
         const dvals = DREAD.map(d => `<td style="text-align:center">${t.dread?.[d.id]||'–'}</td>`).join('');
         rows += `<tr style="${crit?'background:#fff5f5':''}">
@@ -1155,6 +1176,7 @@ function exportReport() {
           <td>${esc(t.description||'–')}</td><td>${esc(t.controls||'–')}</td><td>${esc(t.gaps||'–')}</td>
           ${dvals}
           <td style="text-align:center;font-weight:700;color:${crit?'#dc2626':score>0?'#059669':'#94a3b8'}">${score||'–'}</td>
+          <td>${STATUSES.find(x => x.id === st).name}</td><td>${esc(t.mitigation||'–')}</td><td>${esc(t.owner||'–')}</td>
         </tr>`;
       });
     }
@@ -1168,7 +1190,7 @@ function exportReport() {
       const from = state.components.find(c => c.id === f.from);
       const to   = state.components.find(c => c.id === f.to);
       if (!from || !to) return '';
-      const md = maxDread('f', f.id);
+      const md = maxDreadBy('f', f.id, ['open','accepted']);
       return `<tr><td>${esc(from.name)}</td><td style="color:#94a3b8">→</td><td>${esc(to.name)}</td><td>${esc(f.label||'–')}</td><td>${crosses(f)?'Ja':'Nej'}</td><td style="text-align:center">${cnt('f',f.id)}</td><td style="text-align:center">${md||'–'}</td></tr>`;
     }).join('');
     flowSection = `<section><div class="ch"><h2>Informationsflöden</h2></div>
@@ -1176,16 +1198,23 @@ function exportReport() {
     </section>`;
   }
 
+  const covLabel = { unanalyzed:'Ej analyserad', started:'Påbörjad', analyzed:'Analyserad' };
+  const covTag = { unanalyzed:'background:#f1f5f9;color:#64748b', started:'background:#fff7ed;color:#c2410c', analyzed:'background:#e0f2fe;color:#0369a1' };
   let sections = '';
   for (const comp of state.components) {
     const boundary = comp.bid ? state.boundaries.find(b => b.id === comp.bid) : null;
+    const cov = coverage(comp);
     const { n, table } = buildTable('c', comp.id);
+    const body = n > 0 ? table
+      : cov === 'analyzed' ? '<p class="et">Analyserad – inga hot identifierade.</p>'
+      : '<p class="et">Ej analyserad.</p>';
     sections += `<section><div class="ch">
         <h2>${esc(comp.name)}</h2>
         ${boundary?`<span class="tg">${esc(boundary.name)}</span>`:''}
+        <span class="tg" style="${covTag[cov]}">${covLabel[cov]}</span>
         <span class="tg" style="background:#f1f5f9;color:#64748b">${n} hot</span>
       </div>
-      ${table}
+      ${body}
     </section>`;
   }
 
@@ -1202,6 +1231,7 @@ function exportReport() {
     </section>`;
   }
 
+  const rs = reportStats();
   const html = `<!DOCTYPE html><html lang="sv"><head><meta charset="UTF-8"><title>${esc(sessionName)}</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:48px 24px;color:#1e293b}
@@ -1227,11 +1257,26 @@ tr:last-child td{border-bottom:none}
   <div class="stat"><div class="stat-n">${state.components.length}</div><div class="stat-l">Komponenter</div></div>
   <div class="stat"><div class="stat-n">${state.flows.length}</div><div class="stat-l">Flöden</div></div>
   <div class="stat"><div class="stat-n">${totalThreats}</div><div class="stat-l">Hot dokumenterade</div></div>
-  <div class="stat" style="background:${critThreats>0?'#fff5f5':'#f0fdf4'};border-color:${critThreats>0?'#fecaca':'#bbf7d0'}">
-    <div class="stat-n" style="color:${critThreats>0?'#dc2626':'#059669'}">${critThreats}</div>
-    <div class="stat-l">Kritiska (DREAD ≥${state.threshold})</div>
+  <div class="stat" style="background:${rs.crit>0?'#fff5f5':'#f0fdf4'};border-color:${rs.crit>0?'#fecaca':'#bbf7d0'}">
+    <div class="stat-n" style="color:${rs.crit>0?'#dc2626':'#059669'}">${rs.crit}</div>
+    <div class="stat-l">Kritiska (öppna/accepterade, DREAD ≥${state.threshold})</div>
   </div>
   <div class="stat"><div class="stat-n">${state.boundaries.length}</div><div class="stat-l">Trust boundaries</div></div>
+</div>
+<h2 style="font-size:1.15rem;font-weight:800;margin:0 0 16px">Täckning &amp; status</h2>
+<div class="stats">
+  <div class="stat"><div class="stat-n">${rs.analyzed}</div><div class="stat-l">Analyserade komponenter</div></div>
+  <div class="stat"><div class="stat-n">${rs.started}</div><div class="stat-l">Påbörjade komponenter</div></div>
+  <div class="stat"><div class="stat-n">${rs.unanalyzed}</div><div class="stat-l">Ej analyserade komponenter</div></div>
+  <div class="stat"><div class="stat-n">${rs.analyzedNoThreat}</div><div class="stat-l">Analyserade utan hot</div></div>
+</div>
+<div class="stats">
+  <div class="stat"><div class="stat-n">${rs.open}</div><div class="stat-l">Öppna hot</div></div>
+  <div class="stat"><div class="stat-n">${rs.accepted}</div><div class="stat-l">Accepterade hot</div></div>
+  <div class="stat"><div class="stat-n">${rs.mitigated}</div><div class="stat-l">Åtgärdade hot</div></div>
+  <div class="stat" style="background:${rs.critOpen>0?'#fff5f5':'#f8fafc'};border-color:${rs.critOpen>0?'#fecaca':'#e2e8f0'}">
+    <div class="stat-n" style="color:${rs.critOpen>0?'#dc2626':'#1e293b'}">${rs.critOpen}</div><div class="stat-l">Kritiska öppna hot</div>
+  </div>
 </div>
 <p class="dread-legend">DREAD-kolumner: <strong>D</strong> Damage · <strong>R</strong> Reproducibility · <strong>A</strong> Affected · <strong>E</strong> Exploitability · <strong>Disc</strong> Discoverability. Varje 1–10 (högre = allvarligare / bidrar mer till risken).</p>
 ${flowSection}
