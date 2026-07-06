@@ -1003,19 +1003,20 @@ function exportReport() {
     let rows = '', n = 0;
     for (const cat of CATS) {
       const list = getT(kind, id, cat.id) || [];
-      for (const t of list) {
+      list.forEach((t, i) => {
         n++;
         const score = dreadSum(t);
         const crit  = score > 0 && score >= state.threshold;
         totalThreats++; if (crit) critThreats++;
+        const label = t.title ? esc(t.title) : (list.length > 1 ? `Hot ${i+1}` : '');
         const dvals = DREAD.map(d => `<td style="text-align:center">${t.dread?.[d.id]||'–'}</td>`).join('');
         rows += `<tr style="${crit?'background:#fff5f5':''}">
-          <td><span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:${cat.color};color:white;font-size:.68rem;font-weight:800;margin-right:5px;vertical-align:middle">${cat.id}</span><strong>${cat.name}</strong>${crit?' <span style="color:#dc2626">⚠</span>':''}</td>
+          <td><span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:${cat.color};color:white;font-size:.68rem;font-weight:800;margin-right:5px;vertical-align:middle">${cat.id}</span><strong>${cat.name}</strong>${crit?' <span style="color:#dc2626">⚠</span>':''}${label?`<div style="font-size:.72rem;color:#64748b;margin-top:2px">${label}</div>`:''}</td>
           <td>${esc(t.description||'–')}</td><td>${esc(t.controls||'–')}</td><td>${esc(t.gaps||'–')}</td>
           ${dvals}
           <td style="text-align:center;font-weight:700;color:${crit?'#dc2626':score>0?'#059669':'#94a3b8'}">${score||'–'}</td>
         </tr>`;
-      }
+      });
     }
     return { n, table: n===0 ? '<p class="et">Inga hot identifierade.</p>' :
       `<table>${thead}<tbody>${rows}</tbody></table>` };
