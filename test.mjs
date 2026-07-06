@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -80,7 +80,7 @@ test('migrate lindar enstaka hotobjekt till array med ett element', () => {
   M.migrate(s);
   const list = s.threats['c:abc_S'];
   assert.ok(Array.isArray(list) && list.length === 1);
-  assert.deepEqual({ ...list[0], id:undefined }, { id:undefined, title:'', description:'d', controls:'c', gaps:'g', dread:{ dmg:1 } });
+  assert.deepEqual({ ...list[0], id:undefined }, { id:undefined, title:'', description:'d', controls:'c', gaps:'g', dread:{ dmg:1 }, status:'open', mitigation:'', owner:'' });
 });
 
 test('migrate ar idempotent pa arrayer', () => {
@@ -353,4 +353,102 @@ test('sane avvisar ogiltiga pos/bpos-varden', () => {
   assert.equal(M.sane({ ...M.fresh(), pos:{ abc:{ x:'10', y:2 } } }), false);
   assert.equal(M.sane({ ...M.fresh(), pos:{ abc:null } }), false);
   assert.equal(M.sane({ ...M.fresh(), bpos:{ abc:{ x:1, y:2 } } }), false); // saknar w/h
+});
+
+test('migrate satter status:open + tom mitigation/owner pa gamla hot', () => {
+  const s = { threats: { 'c:abc_S': [{ id:'t1', title:'x' }] } };
+  M.migrate(s);
+  const t = s.threats['c:abc_S'][0];
+  assert.equal(t.status, 'open');
+  assert.equal(t.mitigation, '');
+  assert.equal(t.owner, '');
+});
+
+test('migrate normaliserar okant status till open', () => {
+  const s = { threats: { 'c:abc_S': [{ id:'t1', status:'bogus' }] } };
+  M.migrate(s);
+  assert.equal(s.threats['c:abc_S'][0].status, 'open');
+});
+
+test('migrate bevarar giltigt status', () => {
+  const s = { threats: { 'c:abc_S': [{ id:'t1', status:'accepted', mitigation:'m', owner:'o' }] } };
+  M.migrate(s);
+  const t = s.threats['c:abc_S'][0];
+  assert.equal(t.status, 'accepted');
+  assert.equal(t.mitigation, 'm');
+  assert.equal(t.owner, 'o');
+});
+
+test('migrate satter analysisDone:false pa gamla komponenter', () => {
+  const s = { components: [{ id:'abc', name:'API' }] };
+  M.migrate(s);
+  assert.equal(s.components[0].analysisDone, false);
+});
+
+test('migrate bevarar analysisDone:true', () => {
+  const s = { components: [{ id:'abc', name:'API', analysisDone:true }] };
+  M.migrate(s);
+  assert.equal(s.components[0].analysisDone, true);
+});
+
+test('migrate ar idempotent pa livscykelfalt', () => {
+  const s = { threats: { 'c:abc_S': [{ id:'t1' }] }, components: [{ id:'abc' }] };
+  M.migrate(s);
+  const snap = JSON.stringify(s);
+  M.migrate(s);
+  assert.equal(JSON.stringify(s), snap);
+});
+
+test('sane accepterar giltiga statusvarden', () => {
+  for (const st of ['open','accepted','mitigated'])
+    assert.equal(M.sane({ ...M.fresh(), threats:{ 'c:abc_S':[{ id:'t1', status:st }] } }), true);
+});
+
+test('sane avvisar ogiltigt status', () => {
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'c:abc_S':[{ id:'t1', status:'bogus' }] } }), false);
+});
+
+test('sane avvisar icke-strang mitigation/owner', () => {
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'c:abc_S':[{ id:'t1', mitigation:5 }] } }), false);
+  assert.equal(M.sane({ ...M.fresh(), threats:{ 'c:abc_S':[{ id:'t1', owner:{} }] } }), false);
+});
+
+test('sane avvisar icke-boolean analysisDone', () => {
+  assert.equal(M.sane({ ...M.fresh(), components:[{ id:'abc', analysisDone:'true' }] }), false);
+  assert.equal(M.sane({ ...M.fresh(), components:[{ id:'abc', analysisDone:true }] }), true);
+});
+
+test('coverage: utan hot & !analysisDone → unanalyzed', () => {
+  M.state = M.fresh();
+  assert.equal(M.coverage({ id:'abc' }), 'unanalyzed');
+  assert.equal(M.coverage({ id:'abc', analysisDone:false }), 'unanalyzed');
+});
+
+test('coverage: med hot & !analysisDone → started', () => {
+  M.state = { ...M.fresh(), threats:{ 'c:abc_S':[{ id:'t1' }] } };
+  assert.equal(M.coverage({ id:'abc' }), 'started');
+});
+
+test('coverage: analysisDone:true → analyzed (med/utan hot)', () => {
+  M.state = M.fresh();
+  assert.equal(M.coverage({ id:'abc', analysisDone:true }), 'analyzed');
+  M.state = { ...M.fresh(), threats:{ 'c:abc_S':[{ id:'t1' }] } };
+  assert.equal(M.coverage({ id:'abc', analysisDone:true }), 'analyzed');
+});
+
+test('statusCount raknar hot per status over flera kategorier', () => {
+  M.state = { ...M.fresh(), threats:{
+    'c:abc_S':[{ id:'a', status:'open' }, { id:'b', status:'accepted' }],
+    'c:abc_T':[{ id:'c', status:'mitigated' }, { id:'d', status:'open' }],
+  } };
+  assert.equal(JSON.stringify(M.statusCount('c', 'abc')), JSON.stringify({ open:2, accepted:1, mitigated:1 }));
+});
+
+test('statusCount defaultar hot utan status till open', () => {
+  M.state = { ...M.fresh(), threats:{ 'c:abc_S':[{ id:'a' }] } };
+  assert.equal(JSON.stringify(M.statusCount('c', 'abc')), JSON.stringify({ open:1, accepted:0, mitigated:0 }));
+});
+
+test('STATUSES har de tre livscykel-lagena', () => {
+  assert.equal(JSON.stringify(M.STATUSES.map(s => s.id)), JSON.stringify(['open','accepted','mitigated']));
 });
