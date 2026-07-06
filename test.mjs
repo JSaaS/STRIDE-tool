@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, maxDreadBy, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, maxDreadBy, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, reportStats, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -479,4 +479,45 @@ test('maxDreadBy: 0 nar inga hot matchar statuslistan', () => {
 
 test('STATUSES har de tre livscykel-lagena', () => {
   assert.equal(JSON.stringify(M.STATUSES.map(s => s.id)), JSON.stringify(['open','accepted','mitigated']));
+});
+
+const hi = { dmg:5, rep:5, aff:5, exp:5, dis:5 }; // dreadSum 25 == default threshold
+
+test('reportStats: komponenttackning per lage', () => {
+  M.state = { ...M.fresh(), components:[
+    { id:'c1', analysisDone:true },              // analyzed, inga hot
+    { id:'c2' },                                  // started (har hot)
+    { id:'c3' },                                  // unanalyzed
+  ], threats:{ [M.skey('c','c2','S')]:[{ id:'a', status:'open', dread:hi }] } };
+  const s = M.reportStats();
+  assert.equal(s.comps, 3);
+  assert.equal(s.analyzed, 1);
+  assert.equal(s.started, 1);
+  assert.equal(s.unanalyzed, 1);
+  assert.equal(s.analyzedNoThreat, 1);
+});
+
+test('reportStats: statusfordelning over komponenter + floden', () => {
+  M.state = { ...M.fresh(),
+    components:[{ id:'c1' }],
+    flows:[{ id:'f1', from:'c1', to:'c1' }],
+    threats:{
+      [M.skey('c','c1','S')]:[{ id:'a', status:'open' }, { id:'b', status:'accepted' }],
+      [M.skey('f','f1','T')]:[{ id:'c', status:'mitigated' }, { id:'d' }],
+    } };
+  const s = M.reportStats();
+  assert.equal(s.open, 2);      // 'a' + 'd' (default)
+  assert.equal(s.accepted, 1);
+  assert.equal(s.mitigated, 1);
+});
+
+test('reportStats: kritiska skiljer oppna fran atgardade', () => {
+  M.state = { ...M.fresh(), components:[{ id:'c1' }], threats:{
+    [M.skey('c','c1','S')]:[{ id:'a', status:'open',      dread:hi }],  // kritisk + oppen
+    [M.skey('c','c1','T')]:[{ id:'b', status:'accepted',  dread:hi }],  // kritisk, ej oppen
+    [M.skey('c','c1','E')]:[{ id:'c', status:'mitigated', dread:hi }],  // ej kritisk (mitigerad)
+  } };
+  const s = M.reportStats();
+  assert.equal(s.crit, 2);      // open + accepted >= threshold
+  assert.equal(s.critOpen, 1);  // bara open
 });
