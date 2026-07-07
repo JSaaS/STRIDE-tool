@@ -7,15 +7,17 @@ Webbverktyg för STRIDE-hotmodellering med DREAD-scoring. Användarspråk: svens
 
 ## Arkitektur
 
-- **Allt ligger i `index.html`** — HTML, CSS och JS i en enda fil. Vanilla JS,
-  inget ramverk, inga beroenden i appen, ingen build, inget lint-steg.
+- **`index.html`** innehåller HTML och JS; appens CSS ligger i `styles.css`
+  (länkad via `<link>`). Vanilla JS, inget ramverk, inga beroenden i appen,
+  ingen build, inget lint-steg. (Rapportens CSS i `exportReport` är dock
+  fortsatt inline.)
 - Kör genom att öppna `index.html` i en webbläsare.
 
 ## Test & verifiering
 
 - **Enhetstester:** `node --test test.mjs` (noll beroenden, bara inbyggda
   Node-moduler). `test.mjs` läser `index.html`, kör den rena logiken i en
-  `node:vm`-sandbox och lämnar `index.html` orört — single-file består.
+  `node:vm`-sandbox och lämnar `index.html` orört.
 - Täcker bara DOM-fri logik (`esc`, `tkey`, `dreadSum`, `fresh`, `maxDread`).
   DOM-/interaktionsbeteende verifieras i webbläsaren, inte här.
 
@@ -35,5 +37,6 @@ Webbverktyg för STRIDE-hotmodellering med DREAD-scoring. Användarspråk: svens
 
 ## Konventioner
 
-- Behåll single-file-formen och noll-beroende-ansatsen om inget annat begärs.
+- Behåll noll-beroende-/noll-build-ansatsen om inget annat begärs: HTML+JS i
+  `index.html`, appens CSS i `styles.css`, inga fler filer/ramverk/beroenden.
 - Koden är medvetet terse med korta namn — matcha den stilen.
