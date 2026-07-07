@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, maxDreadBy, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, reportStats, topThreats, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, maxDreadBy, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, reportStats, topThreats, initialTheme, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -584,6 +584,17 @@ test('topThreats: tom vid inga oppna/accepterade', () => {
   assert.equal(M.topThreats(10).length, 0);
   M.state = M.fresh();
   assert.equal(M.topThreats(10).length, 0);
+});
+
+test('initialTheme: sparat val vinner over systempreferens', () => {
+  assert.equal(M.initialTheme('light', true), 'light');
+  assert.equal(M.initialTheme('dark', false), 'dark');
+});
+
+test('initialTheme: utan sparat val foljer prefersDark', () => {
+  assert.equal(M.initialTheme(null, true), 'dark');
+  assert.equal(M.initialTheme(null, false), 'light');
+  assert.equal(M.initialTheme('bogus', true), 'dark'); // ogiltigt sparat → systemet
 });
 
 test('reportStats: kritiska skiljer oppna fran atgardade', () => {
