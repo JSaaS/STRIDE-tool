@@ -17,6 +17,7 @@
       <input type="number" id="threshold" min="5" max="50" value="25">
       <span>/50</span>
     </div>
+    <button class="btn-h" id="theme-btn" title="Växla tema" onclick="toggleTheme()">🌙</button>
     <button class="btn-h" onclick="saveModel()">Spara analys</button>
     <button class="btn-h" onclick="openModel()">Öppna analys</button>
     <button class="btn-h" onclick="exportReport()">Exportera rapport</button>
@@ -210,6 +211,19 @@ const emptyThreat = t => !t.title && !t.description && !t.controls && !t.gaps &&
 // Nytt lista utan hotet med angivet tid.
 const rmTid = (list, tid) => (list || []).filter(t => t.id !== tid);
 
+// Tema: sparat val vinner, annars systemets preferens. Ren funktion.
+const initialTheme = (saved, prefersDark) => saved === 'light' || saved === 'dark' ? saved : (prefersDark ? 'dark' : 'light');
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  const b = document.getElementById('theme-btn');
+  if (b) b.textContent = t === 'dark' ? '☀️' : '🌙';
+}
+function toggleTheme() {
+  const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  applyTheme(t);
+  localStorage.setItem('stride-theme', t);
+}
+
 function getPos(id) {
   if (!state.pos[id]) {
     const idx = state.components.findIndex(c => c.id === id);
@@ -356,7 +370,7 @@ function renderSidebar() {
       html += `<div class="ci${selected?.kind==='c'&&selected.id===c.id?' sel':''}" onclick="selectComp('${esc(c.id)}')">
         ${dot}<span class="nm">${esc(c.name)}</span>
         ${mit > 0 ? `<span class="mchk" title="${mit} åtgärdade">✓${mit}</span>` : ''}
-        ${n > 0 ? `<span class="bd" style="${rt.tone==='crit'||rt.tone==='crit-acc'?'background:#fee2e2;color:#dc2626':''}">${n}</span>` : ''}
+        ${n > 0 ? `<span class="bd" style="${rt.tone==='crit'||rt.tone==='crit-acc'?'background:var(--risk-critical-soft);color:var(--risk-critical)':''}">${n}</span>` : ''}
         <button class="x" onclick="event.stopPropagation();delComponent('${esc(c.id)}')">✕</button>
       </div>`;
     }
@@ -378,7 +392,7 @@ function renderSidebar() {
       <span class="fl">${esc(from.name)} → ${esc(to.name)}${lbl}</span>
       ${crosses(f) ? '<span class="tb" title="Korsar trust boundary">TB</span>' : ''}
       ${mit > 0 ? `<span class="mchk" title="${mit} åtgärdade">✓${mit}</span>` : ''}
-      ${n > 0 ? `<span class="bd" style="${crit?'background:#fee2e2;color:#dc2626':''}">${n}</span>` : ''}
+      ${n > 0 ? `<span class="bd" style="${crit?'background:var(--risk-critical-soft);color:var(--risk-critical)':''}">${n}</span>` : ''}
       <button class="x" onclick="event.stopPropagation();delFlow('${esc(f.id)}')">✕</button>
     </div>`;
   }
@@ -433,11 +447,11 @@ function renderCanvas() {
 
     const dots = CATS.map(cat => {
       const has = getT('c', c.id, cat.id)?.length;
-      return `<div class="dot" style="background:${has ? cat.color : '#e2e8f0'}" title="${cat.name}"></div>`;
+      return `<div class="dot" style="background:${has ? cat.color : 'var(--dot-empty)'}" title="${cat.name}"></div>`;
     }).join('');
 
     const scoreHtml = risk > 0
-      ? `<div class="cn-sc" style="color:${isCrit?'#dc2626':'#94a3b8'}">${isCrit?'⚠ ':''}${risk}/50${rt.acc?' <span title="Accepterad-driven">A</span>':''}${mit>0?` <span class="mchk">✓${mit}</span>`:''}</div>`
+      ? `<div class="cn-sc" style="color:${isCrit?'var(--risk-critical)':'var(--text-faint)'}">${isCrit?'⚠ ':''}${risk}/50${rt.acc?' <span title="Accepterad-driven">A</span>':''}${mit>0?` <span class="mchk">✓${mit}</span>`:''}</div>`
       : (mit > 0 ? `<div class="cn-sc"><span class="mchk">✓${mit}</span></div>` : '');
 
     el.innerHTML = `<div class="cn-name">${esc(c.name)}</div><div class="cn-dots">${dots}</div>${scoreHtml}`;
@@ -1139,6 +1153,7 @@ ${flowThreatSections || '<p class="et" style="padding:0">Inga dokumenterade flö
 }
 
 // ── Init ───────────────────────────────────────────────────────────────
+applyTheme(initialTheme(localStorage.getItem('stride-theme'), window.matchMedia('(prefers-color-scheme: dark)').matches));
 document.getElementById('session-name').value = state.name;
 document.getElementById('threshold').value    = state.threshold;
 window.addEventListener('beforeunload', e => { if (dirty()) { e.preventDefault(); e.returnValue = ''; } });
