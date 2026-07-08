@@ -31,7 +31,7 @@ function loadSandbox() {
   vm.createContext(sandbox);
   // Exponera de funktioner/globaler vi vill testa.
   vm.runInContext(
-    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, maxDreadBy, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, reportStats, topThreats, initialTheme, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
+    code + '\nthis.__exp = { esc, skey, migrate, dreadSum, dreadComplete, fresh, maxDread, maxDreadBy, cnt, catMax, sane, uid, crosses, emptyThreat, rmTid, coverage, statusCount, unscored, flowOffsets, reportStats, topThreats, initialTheme, STATUSES, get state(){return state}, set state(v){state=v}, CATS, getT };',
     sandbox
   );
   return sandbox.__exp;
@@ -475,6 +475,42 @@ test('maxDreadBy: 0 nar inga hot matchar statuslistan', () => {
   } };
   assert.equal(M.maxDreadBy('c', 'c1', ['open','accepted']), 0);
   assert.equal(M.maxDreadBy('c', 'nope', ['open','accepted']), 0);
+});
+
+test('unscored: open/accepted-hot utan poang → true', () => {
+  M.state = { ...M.fresh(), threats:{ 'c:abc_S':[{ id:'a', status:'open' }] } };
+  assert.equal(M.unscored('c', 'abc'), true);
+});
+
+test('unscored: nagot open/accepted-hot poangsatt → false', () => {
+  M.state = { ...M.fresh(), threats:{
+    'c:abc_S':[{ id:'a', status:'open' }],
+    'c:abc_T':[{ id:'b', status:'accepted', dread:{ dmg:1, rep:1, aff:1, exp:1, dis:1 } }],
+  } };
+  assert.equal(M.unscored('c', 'abc'), false);
+});
+
+test('unscored: bara mitigerade eller inga hot → false', () => {
+  M.state = { ...M.fresh(), threats:{ 'c:abc_S':[{ id:'a', status:'mitigated' }] } };
+  assert.equal(M.unscored('c', 'abc'), false);
+  M.state = M.fresh();
+  assert.equal(M.unscored('c', 'abc'), false);
+});
+
+const J = v => JSON.stringify(v);
+
+test('flowOffsets: ensamt flode → 0', () => {
+  assert.equal(J(M.flowOffsets([{ id:'f1', from:'a', to:'b' }])), J({ f1: 0 }));
+});
+
+test('flowOffsets: tva floden samma nodpar (bada riktningar) → symmetriskt', () => {
+  assert.equal(J(M.flowOffsets([{ id:'f1', from:'a', to:'b' }, { id:'f2', from:'b', to:'a' }])), J({ f1: -6, f2: 6 }));
+});
+
+test('flowOffsets: tre floden → -12,0,12; skilda nodpar paverkar ej', () => {
+  assert.equal(
+    J(M.flowOffsets([{ id:'f1', from:'a', to:'b' }, { id:'f2', from:'a', to:'b' }, { id:'f3', from:'b', to:'a' }, { id:'f4', from:'c', to:'d' }])),
+    J({ f1: -12, f2: 0, f3: 12, f4: 0 }));
 });
 
 test('STATUSES har de tre livscykel-lagena', () => {
