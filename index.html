@@ -296,6 +296,12 @@ function statusCount(kind, id) {
   return n;
 }
 
+// Har subjektet dokumenterade men opoängsatta open/accepted-hot? DOM-fri.
+function unscored(kind, id) {
+  const s = statusCount(kind, id);
+  return (s.open + s.accepted) > 0 && maxDreadBy(kind, id, ['open','accepted']) === 0;
+}
+
 // Aggregerad täcknings- och statusöversikt för rapporten. DOM-fri.
 // Kritiskt hot = dreadSum >= threshold. Mitigerade räknas aldrig som kritiska.
 function reportStats() {
@@ -369,6 +375,7 @@ function renderSidebar() {
       const dot = `<span class="rdot ${rt.tone}" title="Risk/täckning"></span>`;
       html += `<div class="ci${selected?.kind==='c'&&selected.id===c.id?' sel':''}" onclick="selectComp('${esc(c.id)}')">
         ${dot}<span class="nm">${esc(c.name)}</span>
+        ${unscored('c', c.id) ? '<span class="udot" title="Har hot men ej poängsatt"></span>' : ''}
         ${mit > 0 ? `<span class="mchk" title="${mit} åtgärdade">✓${mit}</span>` : ''}
         ${n > 0 ? `<span class="bd" style="${rt.tone==='crit'||rt.tone==='crit-acc'?'background:var(--risk-critical-soft);color:var(--risk-critical)':''}">${n}</span>` : ''}
         <button class="x" onclick="event.stopPropagation();delComponent('${esc(c.id)}')">✕</button>
@@ -391,6 +398,7 @@ function renderSidebar() {
     fhtml += `<div class="fi${selected?.kind==='f'&&selected.id===f.id?' sel':''}" onclick="selectFlow('${esc(f.id)}')">
       <span class="fl">${esc(from.name)} → ${esc(to.name)}${lbl}</span>
       ${crosses(f) ? '<span class="tb" title="Korsar trust boundary">TB</span>' : ''}
+      ${unscored('f', f.id) ? '<span class="udot" title="Har hot men ej poängsatt"></span>' : ''}
       ${mit > 0 ? `<span class="mchk" title="${mit} åtgärdade">✓${mit}</span>` : ''}
       ${n > 0 ? `<span class="bd" style="${crit?'background:var(--risk-critical-soft);color:var(--risk-critical)':''}">${n}</span>` : ''}
       <button class="x" onclick="event.stopPropagation();delFlow('${esc(f.id)}')">✕</button>
@@ -436,7 +444,8 @@ function renderCanvas() {
     const rt = riskTone('c', c.id);
     const risk = maxDreadBy('c', c.id, ['open','accepted']);
     const isCrit = rt.tone === 'crit' || rt.tone === 'crit-acc';
-    const mit = statusCount('c', c.id).mitigated;
+    const sc = statusCount('c', c.id);
+    const mit = sc.mitigated;
     const isSel  = selected?.kind === 'c' && selected.id === c.id;
     const isSrc  = flowFrom === c.id;
 
@@ -452,7 +461,9 @@ function renderCanvas() {
 
     const scoreHtml = risk > 0
       ? `<div class="cn-sc" style="color:${isCrit?'var(--risk-critical)':'var(--text-faint)'}">${isCrit?'⚠ ':''}${risk}/50${rt.acc?' <span title="Accepterad-driven">A</span>':''}${mit>0?` <span class="mchk">✓${mit}</span>`:''}</div>`
-      : (mit > 0 ? `<div class="cn-sc"><span class="mchk">✓${mit}</span></div>` : '');
+      : (sc.open + sc.accepted > 0)
+        ? `<div class="cn-sc cn-un">${sc.open+sc.accepted} hot · ej poängsatt${mit>0?` <span class="mchk">✓${mit}</span>`:''}</div>`
+        : (mit > 0 ? `<div class="cn-sc"><span class="mchk">✓${mit}</span></div>` : '');
 
     el.innerHTML = `<div class="cn-name">${esc(c.name)}</div><div class="cn-dots">${dots}</div>${scoreHtml}`;
 
@@ -473,20 +484,31 @@ function renderCanvas() {
   renderFlows(svg);
 }
 
-const FCLR = { sel:'#2563eb', crit:'#dc2626', cross:'#f97316', norm:'#94a3b8' };
+const FCLR = { sel:'#2563eb', crit:'#dc2626', warn:'#f97316', norm:'#94a3b8' };
 
+// Flödesfärg = enbart risk (crossing hanteras separat som TB-markör).
 function flowColorKey(f) {
   if (selected?.kind === 'f' && selected.id === f.id) return 'sel';
   const rt = riskTone('f', f.id);
   if (rt.tone === 'crit' || rt.tone === 'crit-acc') return 'crit';
-  if (rt.tone === 'orange') return 'cross';
-  if (crosses(f)) return 'cross';
+  if (rt.tone === 'orange') return 'warn';
   return 'norm';
+}
+
+// Vinkelräta px-offset per flöde: parallella flöden mellan samma nodpar
+// (oavsett riktning) sprids symmetriskt kring mittlinjen. Ensamt flöde → 0. DOM-fri.
+function flowOffsets(flows) {
+  const g = {};
+  flows.forEach(f => { const k = [f.from, f.to].slice().sort().join('|'); (g[k] = g[k] || []).push(f.id); });
+  const o = {}, GAP = 12;
+  for (const ids of Object.values(g)) ids.forEach((id, i) => o[id] = (i - (ids.length-1)/2) * GAP);
+  return o;
 }
 
 function renderFlows(svg) {
   const defs = `<defs>${Object.entries(FCLR).map(([k,c]) =>
     `<marker id="arr-${k}" markerWidth="9" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0,9 3,0 6" fill="${c}"/></marker>`).join('')}</defs>`;
+  const offs = flowOffsets(state.flows);
   let paths = '';
   for (const f of state.flows) {
     const fp = state.pos[f.from], tp = state.pos[f.to];
@@ -495,18 +517,30 @@ function renderFlows(svg) {
     const tcx = tp.x + NW/2, tcy = tp.y + NH/2;
     const s = edgePt(fcx, fcy, NW, NH, tcx, tcy);
     const e = edgePt(tcx, tcy, NW, NH, fcx, fcy);
-    const mx = (s.x+e.x)/2, my = (s.y+e.y)/2 - 7;
+    const o = offs[f.id] || 0;
+    if (o) {  // vinkelrät förskjutning kring kanonisk nodparslinje
+      const [a, b] = [f.from, f.to].slice().sort();
+      const ap = state.pos[a], bp = state.pos[b];
+      const dx = bp.x - ap.x, dy = bp.y - ap.y, L = Math.hypot(dx, dy) || 1;
+      const px = -dy/L * o, py = dx/L * o;
+      s.x += px; s.y += py; e.x += px; e.y += py;
+    }
+    let mx = (s.x+e.x)/2, my = (s.y+e.y)/2 - 7;
     const key = flowColorKey(f);
     const clr = FCLR[key];
     const accCrit = riskTone('f', f.id).tone === 'crit-acc';  // accepterat-drivet kritiskt flöde
     const oc  = `onclick="selectFlow('${esc(f.id)}')"`;
     paths += `<line x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${e.x.toFixed(1)}" y2="${e.y.toFixed(1)}" stroke="transparent" stroke-width="14" pointer-events="stroke" style="cursor:pointer" ${oc}/>`;
     paths += `<line x1="${s.x.toFixed(1)}" y1="${s.y.toFixed(1)}" x2="${e.x.toFixed(1)}" y2="${e.y.toFixed(1)}" stroke="${clr}" stroke-width="1.5"${accCrit?' stroke-dasharray="6 4"':''} marker-end="url(#arr-${key})"/>`;
+    if (crosses(f)) paths += `<text class="fl-tb" x="${mx.toFixed(1)}" y="${(my-11).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="700" style="cursor:pointer" pointer-events="all" ${oc}><title>Korsar trust boundary</title>TB</text>`;
     if (f.label) paths += `<text x="${mx.toFixed(1)}" y="${my.toFixed(1)}" text-anchor="middle" font-size="11" fill="#64748b" font-family="system-ui,sans-serif" style="cursor:pointer" pointer-events="all" ${oc}>${esc(f.label)}</text>`;
     const risk = maxDreadBy('f', f.id, ['open','accepted']);
     if (risk > 0) {
       const wy = my + (f.label ? 13 : 0);
       paths += `<text x="${mx.toFixed(1)}" y="${wy.toFixed(1)}" text-anchor="middle" font-size="10" fill="${risk>=state.threshold?'#dc2626':'#94a3b8'}" font-family="system-ui,sans-serif" style="cursor:pointer" pointer-events="all" ${oc}>⚠ ${risk}/50${accCrit?' A':''}</text>`;
+    } else if (unscored('f', f.id)) {
+      const sc = statusCount('f', f.id), wy = my + (f.label ? 13 : 0);
+      paths += `<text class="fl-un" x="${mx.toFixed(1)}" y="${wy.toFixed(1)}" text-anchor="middle" font-size="9" font-family="system-ui,sans-serif" style="cursor:pointer" pointer-events="all" ${oc}>${sc.open+sc.accepted} hot · ej poängsatt</text>`;
     }
   }
   svg.innerHTML = defs + paths;

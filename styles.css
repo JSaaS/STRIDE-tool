@@ -125,6 +125,7 @@ aside { width: 214px; background: var(--bg-surface); border-right: 1px solid var
 .rdot.blue { background: var(--status-info); }
 .rdot.green { background: var(--status-ok); }
 .rdot.gray { background: var(--coverage-neutral); }
+.udot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; box-shadow: inset 0 0 0 1.5px var(--text-faint); }
 .mchk { font-size: 0.6rem; font-weight: 700; color: var(--status-ok); flex-shrink: 0; }
 
 /* Map */
@@ -163,8 +164,10 @@ aside { width: 214px; background: var(--bg-surface); border-right: 1px solid var
 .cn-dots { display: flex; gap: 3px; margin-top: 6px; pointer-events: none; }
 .dot { width: 8px; height: 8px; border-radius: 2px; }
 .cn-sc { font-size: 0.64rem; margin-top: 4px; font-weight: 600; pointer-events: none; }
+.cn-sc.cn-un { color: var(--text-muted); font-weight: 500; }
 
 /* Flow SVG */
+.fl-tb, .fl-un { fill: var(--text-muted); }
 #flow-svg { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 2; overflow: visible; }
 
 /* Analysis panel */
