@@ -570,11 +570,21 @@ test('topThreats: titellost hot far Hot N-fallback bara nar kategorin har flera'
   assert.ok(flat.some(t => t.cat === 'T' && t.title === 'Hot 2'));          // flera → Hot N
 });
 
-test('topThreats: respekterar limit', () => {
+test('topThreats: returnerar hela listan osliced', () => {
   M.state = { ...M.fresh(), components:[{ id:'c1', name:'API' }], threats:{
     [M.skey('c','c1','S')]:[{ id:'a', status:'open', dread:hi }, { id:'b', status:'open', dread:hi }, { id:'c', status:'open', dread:hi }],
   } };
-  assert.equal(M.topThreats(2).length, 2);
+  assert.equal(M.topThreats().length, 3);
+});
+
+test('topThreats: inkluderar owner (tom strang nar saknad)', () => {
+  M.state = { ...M.fresh(), components:[{ id:'c1', name:'API' }], threats:{
+    [M.skey('c','c1','S')]:[{ id:'a', status:'open', owner:'Alice', dread:hi }],
+    [M.skey('c','c1','T')]:[{ id:'b', status:'open', dread:{ dmg:1, rep:1, aff:1, exp:1, dis:1 } }],
+  } };
+  const top = M.topThreats();
+  assert.equal(top.find(t => t.cat === 'S').owner, 'Alice');
+  assert.equal(top.find(t => t.cat === 'T').owner, '');
 });
 
 test('topThreats: tom vid inga oppna/accepterade', () => {

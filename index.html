@@ -332,23 +332,23 @@ function flowName(f) {
   return `${from.name} → ${to.name}${f.label ? ` (${f.label})` : ''}`;
 }
 
-// Topplista av öppna+accepterade hot över komponenter och flöden, sorterad på
-// dreadSum fallande, topp `limit`. Mitigerade exkluderas. DOM-fri.
-// Rad: { kind:'c'|'f', subject, cat, title, score, status, crossing }.
-function topThreats(limit) {
+// Hela sorterade listan av öppna+accepterade hot över komponenter och flöden,
+// dreadSum fallande. Mitigerade exkluderas. Rapporten slice:ar till topp N. DOM-fri.
+// Rad: { kind:'c'|'f', subject, cat, title, score, status, crossing, owner }.
+function topThreats() {
   const out = [];
   const collect = (kind, id, subject, crossing) => CATS.forEach(c => {
     const list = getT(kind, id, c.id) || [];
     list.forEach((t, i) => {
       const st = STATUSES.some(x => x.id === t.status) ? t.status : 'open';
       if (st !== 'open' && st !== 'accepted') return;
-      out.push({ kind, subject, cat: c.id, title: t.title || (list.length > 1 ? 'Hot ' + (i+1) : ''), score: dreadSum(t), status: st, crossing });
+      out.push({ kind, subject, cat: c.id, title: t.title || (list.length > 1 ? 'Hot ' + (i+1) : ''), score: dreadSum(t), status: st, crossing, owner: t.owner || '' });
     });
   });
   state.components.forEach(c => collect('c', c.id, c.name, false));
   state.flows.forEach(f => collect('f', f.id, flowName(f), crosses(f)));
   out.sort((a, b) => b.score - a.score);
-  return out.slice(0, limit);
+  return out;
 }
 
 // ── Sidebar ────────────────────────────────────────────────────────────
@@ -1074,21 +1074,28 @@ function exportReport() {
   }
 
   const rs = reportStats();
-  const top = topThreats(10);
+  const full = topThreats();
+  const top = full.slice(0, 10);
   const catName = id => CATS.find(c => c.id === id).name;
   const catColor = id => CATS.find(c => c.id === id).color;
   const topRows = top.map(t => {
     const crit = t.score >= state.threshold;
-    return `<tr style="${crit?'background:#fff5f5':''}">
-      <td>${esc(t.subject)}${t.kind==='f'&&t.crossing?' <span class="tg" style="background:#fff7ed;color:#c2410c">Korsar trust boundary</span>':''}</td>
+    const acc  = t.status === 'accepted';
+    const bg   = crit ? (acc ? '#fffbeb' : '#fff5f5') : '';
+    return `<tr style="${bg?`background:${bg}`:''}">
+      <td>${esc(t.subject)}${acc?' <span class="tg" style="background:#fef3c7;color:#b45309" title="Accepterad risk">A</span>':''}${t.kind==='f'&&t.crossing?' <span class="tg" style="background:#fff7ed;color:#c2410c">Korsar trust boundary</span>':''}</td>
+      <td><span class="tg" style="background:#f1f5f9;color:#64748b">${t.kind==='c'?'Komponent':'Flöde'}</span></td>
       <td><span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;background:${catColor(t.cat)};color:white;font-size:.68rem;font-weight:800;margin-right:5px;vertical-align:middle">${t.cat}</span><strong>${catName(t.cat)}</strong></td>
       <td>${t.title?esc(t.title):'–'}</td>
       <td style="text-align:center;font-weight:700;color:${crit?'#dc2626':'#059669'}">${t.score}${crit?' <span style="color:#dc2626">⚠</span>':''}</td>
+      <td>${t.owner?esc(t.owner):'–'}</td>
       <td>${STATUSES.find(x => x.id === t.status).name}</td>
     </tr>`;
   }).join('');
+  const topMore = full.length > top.length ? `<p class="et" style="padding:8px 13px 12px;font-size:.73rem">Visar de ${top.length} högsta av ${full.length} öppna/accepterade hot.</p>` : '';
   const topSection = top.length === 0 ? '' : `<section>
-    <table><thead><tr><th>Subjekt</th><th>Kategori</th><th>Titel</th><th>DREAD</th><th>Status</th></tr></thead><tbody>${topRows}</tbody></table>
+    <table><thead><tr><th>Subjekt</th><th>Typ</th><th>Kategori</th><th>Titel</th><th>DREAD</th><th>Ansvarig</th><th>Status</th></tr></thead><tbody>${topRows}</tbody></table>
+    ${topMore}
   </section>`;
   const html = `<!DOCTYPE html><html lang="sv"><head><meta charset="UTF-8"><title>${esc(sessionName)}</title>
 <style>
